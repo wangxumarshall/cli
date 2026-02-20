@@ -11,6 +11,7 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/agent"
 	"github.com/entireio/cli/cmd/entire/cli/agent/factoryaidroid"
 	"github.com/entireio/cli/cmd/entire/cli/agent/geminicli"
+	"github.com/entireio/cli/cmd/entire/cli/agent/opencode"
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint"
 	"github.com/entireio/cli/cmd/entire/cli/transcript"
 )
@@ -112,7 +113,7 @@ var minimalDetailTools = map[string]bool{
 
 // BuildCondensedTranscriptFromBytes parses transcript bytes and extracts a condensed view.
 // This is a convenience function that combines parsing and condensing.
-// The agentType parameter determines which parser to use (Claude JSONL vs Gemini JSON).
+// The agentType parameter determines which parser to use (Claude/OpenCode JSONL vs Gemini JSON).
 func BuildCondensedTranscriptFromBytes(content []byte, agentType agent.AgentType) ([]Entry, error) {
 	switch agentType {
 	case agent.AgentTypeGemini:
@@ -124,6 +125,8 @@ func BuildCondensedTranscriptFromBytes(content []byte, agentType agent.AgentType
 			return nil, fmt.Errorf("failed to parse Droid transcript: %w", err)
 		}
 		return BuildCondensedTranscript(droidLines), nil
+	case agent.AgentTypeOpenCode:
+		return buildCondensedTranscriptFromOpenCode(content)
 	case agent.AgentTypeClaudeCode, agent.AgentTypeUnknown:
 		// Claude format - fall through to shared logic below
 	}
@@ -165,7 +168,7 @@ func buildCondensedTranscriptFromGemini(content []byte) ([]Entry, error) {
 				entries = append(entries, Entry{
 					Type:       EntryTypeTool,
 					ToolName:   tc.Name,
-					ToolDetail: extractGeminiToolDetail(tc.Args),
+					ToolDetail: extractGenericToolDetail(tc.Args),
 				})
 			}
 		}
@@ -174,11 +177,50 @@ func buildCondensedTranscriptFromGemini(content []byte) ([]Entry, error) {
 	return entries, nil
 }
 
-// extractGeminiToolDetail extracts an appropriate detail string from Gemini tool args.
-func extractGeminiToolDetail(args map[string]interface{}) string {
-	// Check common fields in order of preference
+// buildCondensedTranscriptFromOpenCode parses OpenCode JSONL transcript and extracts a condensed view.
+func buildCondensedTranscriptFromOpenCode(content []byte) ([]Entry, error) {
+	messages, err := opencode.ParseMessages(content)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse OpenCode transcript: %w", err)
+	}
+
+	var entries []Entry
+	for _, msg := range messages {
+		switch msg.Role {
+		case "user":
+			if msg.Content != "" {
+				entries = append(entries, Entry{
+					Type:    EntryTypeUser,
+					Content: msg.Content,
+				})
+			}
+		case "assistant":
+			if msg.Content != "" {
+				entries = append(entries, Entry{
+					Type:    EntryTypeAssistant,
+					Content: msg.Content,
+				})
+			}
+			for _, part := range msg.Parts {
+				if part.Type == "tool" && part.State != nil {
+					entries = append(entries, Entry{
+						Type:       EntryTypeTool,
+						ToolName:   part.Tool,
+						ToolDetail: extractGenericToolDetail(part.State.Input),
+					})
+				}
+			}
+		}
+	}
+
+	return entries, nil
+}
+
+// extractGenericToolDetail extracts an appropriate detail string from a tool's input/args map.
+// Checks common fields in order of preference. Used by both OpenCode and Gemini condensation.
+func extractGenericToolDetail(input map[string]interface{}) string {
 	for _, key := range []string{"description", "command", "file_path", "path", "pattern"} {
-		if v, ok := args[key].(string); ok && v != "" {
+		if v, ok := input[key].(string); ok && v != "" {
 			return v
 		}
 	}

@@ -13,11 +13,8 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 )
 
-// Ensure FactoryAIDroidAgent implements HookSupport and HookHandler
-var (
-	_ agent.HookSupport = (*FactoryAIDroidAgent)(nil)
-	_ agent.HookHandler = (*FactoryAIDroidAgent)(nil)
-)
+// Ensure FactoryAIDroidAgent implements HookSupport
+var _ agent.HookSupport = (*FactoryAIDroidAgent)(nil)
 
 // Factory AI Droid hook names - these become subcommands under `entire hooks factoryai-droid`
 const (

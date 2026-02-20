@@ -94,6 +94,7 @@ const (
 	AgentNameClaudeCode     AgentName = "claude-code"
 	AgentNameFactoryAIDroid AgentName = "factoryai-droid"
 	AgentNameGemini         AgentName = "gemini"
+	AgentNameOpenCode       AgentName = "opencode"
 )
 
 // Agent type constants (type identifiers stored in metadata/trailers)
@@ -101,6 +102,7 @@ const (
 	AgentTypeClaudeCode     AgentType = "Claude Code"
 	AgentTypeFactoryAIDroid AgentType = "Factory AI Droid"
 	AgentTypeGemini         AgentType = "Gemini CLI"
+	AgentTypeOpenCode       AgentType = "OpenCode"
 	AgentTypeUnknown        AgentType = "Agent" // Fallback for backwards compatibility
 )
 
