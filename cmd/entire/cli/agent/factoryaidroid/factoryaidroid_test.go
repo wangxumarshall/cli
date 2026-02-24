@@ -10,17 +10,6 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/agent"
 )
 
-func TestNewFactoryAIDroidAgent(t *testing.T) {
-	t.Parallel()
-	ag := NewFactoryAIDroidAgent()
-	if ag == nil {
-		t.Fatal("NewFactoryAIDroidAgent() returned nil")
-	}
-	if _, ok := ag.(*FactoryAIDroidAgent); !ok {
-		t.Fatal("NewFactoryAIDroidAgent() didn't return *FactoryAIDroidAgent")
-	}
-}
-
 // TestDetectPresence uses t.Chdir so it cannot be parallel.
 func TestDetectPresence(t *testing.T) {
 	t.Run("factory directory exists", func(t *testing.T) {

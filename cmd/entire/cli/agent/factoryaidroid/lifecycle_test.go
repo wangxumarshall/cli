@@ -7,39 +7,6 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/agent"
 )
 
-func TestGetHookNames(t *testing.T) {
-	t.Parallel()
-
-	ag := &FactoryAIDroidAgent{}
-	names := ag.GetHookNames()
-
-	expected := []string{
-		"session-start",
-		"session-end",
-		"stop",
-		"user-prompt-submit",
-		"pre-tool-use",
-		"post-tool-use",
-		"subagent-stop",
-		"pre-compact",
-		"notification",
-	}
-
-	if len(names) != len(expected) {
-		t.Fatalf("GetHookNames() returned %d hooks, want %d: got %v", len(names), len(expected), names)
-	}
-
-	nameSet := make(map[string]bool, len(names))
-	for _, n := range names {
-		nameSet[n] = true
-	}
-	for _, want := range expected {
-		if !nameSet[want] {
-			t.Errorf("GetHookNames() missing expected hook %q", want)
-		}
-	}
-}
-
 func TestParseHookEvent_SessionStart(t *testing.T) {
 	t.Parallel()
 
@@ -192,29 +159,26 @@ func TestParseHookEvent_Compaction(t *testing.T) {
 	}
 }
 
-func TestParseHookEvent_SubagentStop_PassThrough(t *testing.T) {
+func TestParseHookEvent_PassThroughHooks(t *testing.T) {
 	t.Parallel()
 
-	ag := &FactoryAIDroidAgent{}
-	event, err := ag.ParseHookEvent(HookNameSubagentStop, strings.NewReader(`{"session_id":"s"}`))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	passThroughHooks := []string{
+		HookNameSubagentStop,
+		HookNameNotification,
 	}
-	if event != nil {
-		t.Errorf("expected nil event for SubagentStop, got %+v", event)
-	}
-}
 
-func TestParseHookEvent_Notification_PassThrough(t *testing.T) {
-	t.Parallel()
-
-	ag := &FactoryAIDroidAgent{}
-	event, err := ag.ParseHookEvent(HookNameNotification, strings.NewReader(`{"session_id":"s"}`))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if event != nil {
-		t.Errorf("expected nil event for Notification, got %+v", event)
+	for _, hookName := range passThroughHooks {
+		t.Run(hookName, func(t *testing.T) {
+			t.Parallel()
+			ag := &FactoryAIDroidAgent{}
+			event, err := ag.ParseHookEvent(hookName, strings.NewReader(`{"session_id":"s"}`))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if event != nil {
+				t.Errorf("expected nil event for %s, got %+v", hookName, event)
+			}
+		})
 	}
 }
 

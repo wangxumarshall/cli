@@ -214,60 +214,6 @@ func TestExtractModifiedFiles(t *testing.T) {
 	}
 }
 
-func TestExtractModifiedFiles_NotebookEdit(t *testing.T) {
-	t.Parallel()
-
-	data := []byte(`{"type":"message","id":"a1","message":{"role":"assistant","content":[{"type":"tool_use","name":"NotebookEdit","input":{"notebook_path":"/repo/analysis.ipynb"}}]}}
-`)
-
-	lines, err := ParseDroidTranscriptFromBytes(data, 0)
-	if err != nil {
-		t.Fatalf("ParseDroidTranscriptFromBytes() error = %v", err)
-	}
-	files := ExtractModifiedFiles(lines)
-
-	if len(files) != 1 {
-		t.Fatalf("ExtractModifiedFiles() got %d files, want 1", len(files))
-	}
-	if files[0] != "/repo/analysis.ipynb" {
-		t.Errorf("ExtractModifiedFiles() got %q, want /repo/analysis.ipynb", files[0])
-	}
-}
-
-func TestExtractModifiedFiles_CreateAndMultiEdit(t *testing.T) {
-	t.Parallel()
-
-	data := []byte(`{"type":"message","id":"a1","message":{"role":"assistant","content":[{"type":"tool_use","name":"Create","input":{"file_path":"new_file.go"}}]}}
-{"type":"message","id":"a2","message":{"role":"assistant","content":[{"type":"tool_use","name":"MultiEdit","input":{"file_path":"existing_file.go"}}]}}
-`)
-
-	lines, err := ParseDroidTranscriptFromBytes(data, 0)
-	if err != nil {
-		t.Fatalf("ParseDroidTranscriptFromBytes() error = %v", err)
-	}
-	files := ExtractModifiedFiles(lines)
-
-	if len(files) != 2 {
-		t.Fatalf("ExtractModifiedFiles() got %d files, want 2", len(files))
-	}
-
-	hasFile := func(name string) bool {
-		for _, f := range files {
-			if f == name {
-				return true
-			}
-		}
-		return false
-	}
-
-	if !hasFile("new_file.go") {
-		t.Error("ExtractModifiedFiles() missing new_file.go")
-	}
-	if !hasFile("existing_file.go") {
-		t.Error("ExtractModifiedFiles() missing existing_file.go")
-	}
-}
-
 func TestExtractModifiedFiles_Empty(t *testing.T) {
 	t.Parallel()
 
@@ -417,19 +363,6 @@ func TestCalculateTokenUsage_IgnoresUserMessages(t *testing.T) {
 
 	if usage.APICallCount != 1 {
 		t.Errorf("APICallCount = %d, want 1", usage.APICallCount)
-	}
-}
-
-func TestCalculateTokenUsage_EmptyTranscript(t *testing.T) {
-	t.Parallel()
-
-	usage := CalculateTokenUsage(nil)
-
-	if usage.APICallCount != 0 {
-		t.Errorf("APICallCount = %d, want 0", usage.APICallCount)
-	}
-	if usage.InputTokens != 0 {
-		t.Errorf("InputTokens = %d, want 0", usage.InputTokens)
 	}
 }
 

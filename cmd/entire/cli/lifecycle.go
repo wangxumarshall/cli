@@ -446,8 +446,6 @@ func handleLifecycleCompaction(ag agent.Agent, event *agent.Event) error {
 }
 
 // handleLifecycleSessionEnd handles session end: marks the session as ended.
-// Idempotent: if the session is already ended (e.g., some agents fire this hook
-// twice), the second call is a no-op.
 func handleLifecycleSessionEnd(ag agent.Agent, event *agent.Event) error {
 	logCtx := logging.WithAgent(logging.WithComponent(context.Background(), "lifecycle"), ag.Name())
 	logging.Info(logCtx, "session-end",
