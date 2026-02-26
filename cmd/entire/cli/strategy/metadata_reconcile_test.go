@@ -402,15 +402,12 @@ func TestReconcileDisconnected_ModifiedEntries(t *testing.T) {
 		[]byte(`{"checkpoint_id":"aaaaaaaaaaaa","session_count":2}`), 0o644); err != nil {
 		t.Fatalf("failed to write: %v", err)
 	}
+	if err := os.MkdirAll(filepath.Join(dir1, "1"), 0o755); err != nil {
+		t.Fatalf("failed to create dir: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(dir1, "1", "metadata.json"),
 		[]byte(`{"session_id":"second-session"}`), 0o644); err != nil {
-		if err := os.MkdirAll(filepath.Join(dir1, "1"), 0o755); err != nil {
-			t.Fatalf("failed to create dir: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(dir1, "1", "metadata.json"),
-			[]byte(`{"session_id":"second-session"}`), 0o644); err != nil {
-			t.Fatalf("failed to write: %v", err)
-		}
+		t.Fatalf("failed to write: %v", err)
 	}
 	run("add", ".")
 	run("commit", "-m", "Checkpoint: aaaaaaaaaaaa (update)")
