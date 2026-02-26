@@ -208,14 +208,8 @@ func resumeMultipleCheckpoints(ctx context.Context, repo *git.Repository, checkp
 		}
 	}
 
-	type sessionEntry struct {
-		index     int
-		CreatedAt time.Time
-	}
-
 	strat := GetStrategy(ctx)
 	var allSessions []strategy.RestoredSession
-	seen := make(map[string]sessionEntry)
 
 	for _, cpID := range checkpointIDs {
 		metadata, metaErr := strategy.ReadCheckpointMetadata(metadataTree, cpID.Path())
@@ -248,17 +242,7 @@ func resumeMultipleCheckpoints(ctx context.Context, repo *git.Repository, checkp
 			continue
 		}
 
-		for _, sess := range sessions {
-			if prev, exists := seen[sess.SessionID]; exists {
-				// Keep the one with the later CreatedAt (more complete transcript)
-				if sess.CreatedAt.After(prev.CreatedAt) {
-					allSessions[seen[sess.SessionID].index] = sess
-				}
-			} else {
-				seen[sess.SessionID] = sessionEntry{index: len(allSessions), CreatedAt: sess.CreatedAt}
-				allSessions = append(allSessions, sess)
-			}
-		}
+		allSessions = deduplicateSessions(allSessions, sessions)
 	}
 
 	if len(allSessions) == 0 {
@@ -272,6 +256,36 @@ func resumeMultipleCheckpoints(ctx context.Context, repo *git.Repository, checkp
 	)
 
 	return displayRestoredSessions(allSessions)
+}
+
+// deduplicateSessions merges new sessions into existing, keeping the one with the latest
+// CreatedAt when a SessionID appears more than once. This handles squash merges where the
+// same session may be referenced by multiple checkpoints.
+func deduplicateSessions(existing, incoming []strategy.RestoredSession) []strategy.RestoredSession {
+	type entry struct {
+		index     int
+		createdAt time.Time
+	}
+
+	seen := make(map[string]entry, len(existing))
+	for i, s := range existing {
+		seen[s.SessionID] = entry{index: i, createdAt: s.CreatedAt}
+	}
+
+	for _, sess := range incoming {
+		if prev, exists := seen[sess.SessionID]; exists {
+			// Keep the one with the later CreatedAt (more complete transcript)
+			if sess.CreatedAt.After(prev.createdAt) {
+				existing[prev.index] = sess
+				seen[sess.SessionID] = entry{index: prev.index, createdAt: sess.CreatedAt}
+			}
+		} else {
+			seen[sess.SessionID] = entry{index: len(existing), createdAt: sess.CreatedAt}
+			existing = append(existing, sess)
+		}
+	}
+
+	return existing
 }
 
 // branchCheckpointResult contains the result of searching for a checkpoint on a branch.

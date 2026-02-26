@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint/id"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
@@ -435,6 +436,114 @@ func createCheckpointOnMetadataBranchWithID(t *testing.T, repo *git.Repository, 
 	}
 
 	return checkpointID
+}
+
+func TestDeduplicateSessions(t *testing.T) {
+	t.Parallel()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	t1 := t0.Add(1 * time.Hour)
+	t2 := t0.Add(2 * time.Hour)
+
+	t.Run("no duplicates keeps all", func(t *testing.T) {
+		t.Parallel()
+		existing := []strategy.RestoredSession{
+			{SessionID: "s1", CreatedAt: t0},
+		}
+		incoming := []strategy.RestoredSession{
+			{SessionID: "s2", CreatedAt: t1},
+		}
+		got := deduplicateSessions(existing, incoming)
+		if len(got) != 2 {
+			t.Fatalf("got %d sessions, want 2", len(got))
+		}
+		if got[0].SessionID != "s1" || got[1].SessionID != "s2" {
+			t.Errorf("got [%s, %s], want [s1, s2]", got[0].SessionID, got[1].SessionID)
+		}
+	})
+
+	t.Run("duplicate keeps newer", func(t *testing.T) {
+		t.Parallel()
+		existing := []strategy.RestoredSession{
+			{SessionID: "s1", Prompt: "old", CreatedAt: t0},
+		}
+		incoming := []strategy.RestoredSession{
+			{SessionID: "s1", Prompt: "new", CreatedAt: t1},
+		}
+		got := deduplicateSessions(existing, incoming)
+		if len(got) != 1 {
+			t.Fatalf("got %d sessions, want 1", len(got))
+		}
+		if got[0].Prompt != "new" {
+			t.Errorf("got prompt %q, want %q", got[0].Prompt, "new")
+		}
+	})
+
+	t.Run("duplicate keeps existing when newer", func(t *testing.T) {
+		t.Parallel()
+		existing := []strategy.RestoredSession{
+			{SessionID: "s1", Prompt: "newer", CreatedAt: t1},
+		}
+		incoming := []strategy.RestoredSession{
+			{SessionID: "s1", Prompt: "older", CreatedAt: t0},
+		}
+		got := deduplicateSessions(existing, incoming)
+		if len(got) != 1 {
+			t.Fatalf("got %d sessions, want 1", len(got))
+		}
+		if got[0].Prompt != "newer" {
+			t.Errorf("got prompt %q, want %q", got[0].Prompt, "newer")
+		}
+	})
+
+	t.Run("three occurrences keeps latest", func(t *testing.T) {
+		t.Parallel()
+		// This is the case the bug affected: after replacing once, the seen map
+		// must reflect the updated CreatedAt so the third occurrence compares correctly.
+		batch1 := []strategy.RestoredSession{
+			{SessionID: "s1", Prompt: "oldest", CreatedAt: t0},
+		}
+		batch2 := []strategy.RestoredSession{
+			{SessionID: "s1", Prompt: "newest", CreatedAt: t2},
+		}
+		batch3 := []strategy.RestoredSession{
+			{SessionID: "s1", Prompt: "middle", CreatedAt: t1},
+		}
+		result := deduplicateSessions(nil, batch1)
+		result = deduplicateSessions(result, batch2)
+		result = deduplicateSessions(result, batch3)
+		if len(result) != 1 {
+			t.Fatalf("got %d sessions, want 1", len(result))
+		}
+		if result[0].Prompt != "newest" {
+			t.Errorf("got prompt %q, want %q", result[0].Prompt, "newest")
+		}
+	})
+
+	t.Run("mixed unique and duplicate", func(t *testing.T) {
+		t.Parallel()
+		existing := []strategy.RestoredSession{
+			{SessionID: "s1", Prompt: "s1-old", CreatedAt: t0},
+			{SessionID: "s2", Prompt: "s2-only", CreatedAt: t0},
+		}
+		incoming := []strategy.RestoredSession{
+			{SessionID: "s1", Prompt: "s1-new", CreatedAt: t1},
+			{SessionID: "s3", Prompt: "s3-only", CreatedAt: t1},
+		}
+		got := deduplicateSessions(existing, incoming)
+		if len(got) != 3 {
+			t.Fatalf("got %d sessions, want 3", len(got))
+		}
+		if got[0].Prompt != "s1-new" {
+			t.Errorf("s1: got prompt %q, want %q", got[0].Prompt, "s1-new")
+		}
+		if got[1].SessionID != "s2" {
+			t.Errorf("got[1].SessionID = %q, want %q", got[1].SessionID, "s2")
+		}
+		if got[2].SessionID != "s3" {
+			t.Errorf("got[2].SessionID = %q, want %q", got[2].SessionID, "s3")
+		}
+	})
 }
 
 func TestFindCheckpointInHistory_MultipleCheckpoints(t *testing.T) {
