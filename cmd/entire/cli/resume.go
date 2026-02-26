@@ -272,54 +272,12 @@ func resumeMultipleCheckpoints(ctx context.Context, repo *git.Repository, checkp
 		return nil
 	}
 
-	// Sort by CreatedAt (same as resumeSession)
-	sort.Slice(allSessions, func(i, j int) bool {
-		return allSessions[i].CreatedAt.Before(allSessions[j].CreatedAt)
-	})
-
 	logging.Debug(logCtx, "resume multiple checkpoints completed",
 		slog.Int("checkpoint_count", len(checkpointIDs)),
 		slog.Int("session_count", len(allSessions)),
 	)
 
-	// Display resume commands (same format as resumeSession)
-	if len(allSessions) > 1 {
-		fmt.Fprintf(os.Stderr, "\nRestored %d sessions. To continue, run:\n", len(allSessions))
-	} else {
-		fmt.Fprintf(os.Stderr, "Session: %s\n", allSessions[0].SessionID)
-		fmt.Fprintf(os.Stderr, "\nTo continue this session, run:\n")
-	}
-	for i, sess := range allSessions {
-		sessionAgent, agErr := strategy.ResolveAgentForRewind(sess.Agent)
-		if agErr != nil {
-			return fmt.Errorf("failed to resolve agent for session %s: %w", sess.SessionID, agErr)
-		}
-		cmd := sessionAgent.FormatResumeCommand(sess.SessionID)
-
-		if len(allSessions) > 1 {
-			if i == len(allSessions)-1 {
-				if sess.Prompt != "" {
-					fmt.Fprintf(os.Stderr, "  %s  # %s (most recent)\n", cmd, sess.Prompt)
-				} else {
-					fmt.Fprintf(os.Stderr, "  %s  # (most recent)\n", cmd)
-				}
-			} else {
-				if sess.Prompt != "" {
-					fmt.Fprintf(os.Stderr, "  %s  # %s\n", cmd, sess.Prompt)
-				} else {
-					fmt.Fprintf(os.Stderr, "  %s\n", cmd)
-				}
-			}
-		} else {
-			if sess.Prompt != "" {
-				fmt.Fprintf(os.Stderr, "  %s  # %s\n", cmd, sess.Prompt)
-			} else {
-				fmt.Fprintf(os.Stderr, "  %s\n", cmd)
-			}
-		}
-	}
-
-	return nil
+	return displayRestoredSessions(allSessions)
 }
 
 // branchCheckpointResult contains the result of searching for a checkpoint on a branch.
@@ -570,24 +528,28 @@ func resumeSession(ctx context.Context, sessionID string, checkpointID id.Checkp
 		return resumeSingleSession(ctx, ag, sessionID, checkpointID, repoRoot, force)
 	}
 
-	// Sort sessions by CreatedAt so the most recent is last (for display).
-	// This fixes ordering when subdirectory index doesn't reflect activity order.
-	sort.Slice(sessions, func(i, j int) bool {
-		return sessions[i].CreatedAt.Before(sessions[j].CreatedAt)
-	})
-
 	logging.Debug(logCtx, "resume session completed",
 		slog.String("checkpoint_id", checkpointID.String()),
 		slog.Int("session_count", len(sessions)),
 	)
 
-	// Print per-session resume commands using returned sessions
+	return displayRestoredSessions(sessions)
+}
+
+// displayRestoredSessions sorts sessions by CreatedAt and prints resume commands.
+// Used by both resumeSession (single checkpoint) and resumeMultipleCheckpoints (squash merge).
+func displayRestoredSessions(sessions []strategy.RestoredSession) error {
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].CreatedAt.Before(sessions[j].CreatedAt)
+	})
+
 	if len(sessions) > 1 {
 		fmt.Fprintf(os.Stderr, "\nRestored %d sessions. To continue, run:\n", len(sessions))
 	} else if len(sessions) == 1 {
 		fmt.Fprintf(os.Stderr, "Session: %s\n", sessions[0].SessionID)
 		fmt.Fprintf(os.Stderr, "\nTo continue this session, run:\n")
 	}
+
 	for i, sess := range sessions {
 		sessionAgent, err := strategy.ResolveAgentForRewind(sess.Agent)
 		if err != nil {
@@ -595,26 +557,16 @@ func resumeSession(ctx context.Context, sessionID string, checkpointID id.Checkp
 		}
 		cmd := sessionAgent.FormatResumeCommand(sess.SessionID)
 
-		if len(sessions) > 1 {
-			if i == len(sessions)-1 {
-				if sess.Prompt != "" {
-					fmt.Fprintf(os.Stderr, "  %s  # %s (most recent)\n", cmd, sess.Prompt)
-				} else {
-					fmt.Fprintf(os.Stderr, "  %s  # (most recent)\n", cmd)
-				}
-			} else {
-				if sess.Prompt != "" {
-					fmt.Fprintf(os.Stderr, "  %s  # %s\n", cmd, sess.Prompt)
-				} else {
-					fmt.Fprintf(os.Stderr, "  %s\n", cmd)
-				}
-			}
-		} else {
-			if sess.Prompt != "" {
-				fmt.Fprintf(os.Stderr, "  %s  # %s\n", cmd, sess.Prompt)
-			} else {
-				fmt.Fprintf(os.Stderr, "  %s\n", cmd)
-			}
+		isLast := i == len(sessions)-1
+		switch {
+		case len(sessions) > 1 && isLast && sess.Prompt != "":
+			fmt.Fprintf(os.Stderr, "  %s  # %s (most recent)\n", cmd, sess.Prompt)
+		case len(sessions) > 1 && isLast:
+			fmt.Fprintf(os.Stderr, "  %s  # (most recent)\n", cmd)
+		case sess.Prompt != "":
+			fmt.Fprintf(os.Stderr, "  %s  # %s\n", cmd, sess.Prompt)
+		default:
+			fmt.Fprintf(os.Stderr, "  %s\n", cmd)
 		}
 	}
 
