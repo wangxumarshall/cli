@@ -54,8 +54,14 @@ var ( //nolint:gochecknoglobals // intentional per-process gate
 
 // EnsureMetadataReconciled checks for and repairs disconnected local/remote metadata
 // branches. Safe to call multiple times — uses sync.Once internally.
-func EnsureMetadataReconciled(repo *git.Repository) error {
+// Opens its own repository to avoid capturing a caller's repo instance forever.
+func EnsureMetadataReconciled() error {
 	reconcileOnce.Do(func() {
+		repo, err := OpenRepository(context.Background())
+		if err != nil {
+			reconcileResult = fmt.Errorf("failed to open repository for reconciliation: %w", err)
+			return
+		}
 		reconcileResult = ReconcileDisconnectedMetadataBranch(repo)
 	})
 	return reconcileResult
@@ -137,7 +143,7 @@ func ListCheckpoints(ctx context.Context) ([]CheckpointInfo, error) {
 	}
 
 	// Ensure disconnected metadata branches are reconciled before reading
-	if reconcileErr := EnsureMetadataReconciled(repo); reconcileErr != nil {
+	if reconcileErr := EnsureMetadataReconciled(); reconcileErr != nil {
 		fmt.Fprintf(os.Stderr, "[entire] Warning: %v\n", reconcileErr)
 	}
 

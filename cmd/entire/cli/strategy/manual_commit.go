@@ -52,7 +52,7 @@ func (s *ManualCommitStrategy) getCheckpointStore() (*checkpoint.GitStore, error
 			s.checkpointStoreErr = fmt.Errorf("failed to open repository: %w", err)
 			return
 		}
-		if err := EnsureMetadataReconciled(repo); err != nil {
+		if err := EnsureMetadataReconciled(); err != nil {
 			fmt.Fprintf(os.Stderr, "[entire] Warning: %v\n", err)
 		}
 		s.checkpointStore = checkpoint.NewGitStore(repo)
