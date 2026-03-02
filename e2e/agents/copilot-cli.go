@@ -23,7 +23,7 @@ type CopilotCLI struct{}
 func (c *CopilotCLI) Name() string               { return "copilot-cli" }
 func (c *CopilotCLI) Binary() string             { return "copilot" }
 func (c *CopilotCLI) EntireAgent() string        { return "copilot-cli" }
-func (c *CopilotCLI) PromptPattern() string      { return `>` }
+func (c *CopilotCLI) PromptPattern() string      { return `❯` }
 func (c *CopilotCLI) TimeoutMultiplier() float64 { return 1.5 }
 
 func (c *CopilotCLI) IsTransientError(out Output, err error) bool {
@@ -111,10 +111,20 @@ func (c *CopilotCLI) StartSession(ctx context.Context, dir string) (Session, err
 		return nil, err
 	}
 
-	// Wait for the interactive prompt to be ready.
-	if _, err := s.WaitFor(`>`, 30*time.Second); err != nil {
-		_ = s.Close()
-		return nil, fmt.Errorf("waiting for startup prompt: %w", err)
+	// Dismiss startup dialogs (folder trust, etc.) then wait for the "❯" prompt.
+	// Copilot CLI shows a "Confirm folder trust" dialog in interactive mode for
+	// new directories. "Yes" is pre-selected, so Enter dismisses it.
+	for range 5 {
+		content, err := s.WaitFor(`(❯|Enter to select)`, 30*time.Second)
+		if err != nil {
+			_ = s.Close()
+			return nil, fmt.Errorf("waiting for startup prompt: %w", err)
+		}
+		if strings.Contains(content, "❯") && !strings.Contains(content, "Enter to select") {
+			break
+		}
+		_ = s.SendKeys("Enter")
+		time.Sleep(500 * time.Millisecond)
 	}
 	s.stableAtSend = ""
 
