@@ -54,7 +54,7 @@ func (c *CopilotCLI) Bootstrap() error {
 }
 
 func (c *CopilotCLI) RunPrompt(ctx context.Context, dir string, prompt string, opts ...Option) (Output, error) {
-	cfg := &runConfig{Model: "claude-haiku-4.5"}
+	cfg := &runConfig{Model: "gpt-4.1"}
 	for _, o := range opts {
 		o(cfg)
 	}
@@ -106,7 +106,7 @@ func (c *CopilotCLI) RunPrompt(ctx context.Context, dir string, prompt string, o
 
 func (c *CopilotCLI) StartSession(ctx context.Context, dir string) (Session, error) {
 	name := fmt.Sprintf("copilot-test-%d", time.Now().UnixNano())
-	s, err := NewTmuxSession(name, dir, nil, "env", "ENTIRE_TEST_TTY=0", c.Binary(), "--model", "claude-haiku-4.5", "--allow-all")
+	s, err := NewTmuxSession(name, dir, nil, "env", "ENTIRE_TEST_TTY=0", c.Binary(), "--model", "gpt-4.1", "--allow-all")
 	if err != nil {
 		return nil, err
 	}
