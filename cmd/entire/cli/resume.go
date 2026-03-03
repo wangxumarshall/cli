@@ -563,9 +563,6 @@ func resumeSession(ctx context.Context, sessionID string, checkpointID id.Checkp
 // Used by both resumeSession (single checkpoint) and resumeMultipleCheckpoints (squash merge).
 func displayRestoredSessions(sessions []strategy.RestoredSession) error {
 	sort.SliceStable(sessions, func(i, j int) bool {
-		if sessions[i].CreatedAt.Equal(sessions[j].CreatedAt) {
-			return sessions[i].SessionID < sessions[j].SessionID
-		}
 		return sessions[i].CreatedAt.Before(sessions[j].CreatedAt)
 	})
 
