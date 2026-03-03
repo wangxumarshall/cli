@@ -387,6 +387,8 @@ func EnsureMetadataBranch(repo *git.Repository) error {
 }
 
 // isEmptyMetadataBranch returns true if the branch ref points to a commit with an empty tree.
+// Only checks the tip commit — if a data commit sits on top of an empty orphan, this returns
+// false, which is correct: the bug this detects creates a single empty orphan as the tip.
 func isEmptyMetadataBranch(repo *git.Repository, ref *plumbing.Reference) (bool, error) {
 	commit, err := repo.CommitObject(ref.Hash())
 	if err != nil {

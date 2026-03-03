@@ -25,7 +25,7 @@ var disconnectedOnce sync.Once //nolint:gochecknoglobals // intentional per-proc
 // Returns (false, nil) if either branch is missing, they point to the same hash,
 // or they share a common ancestor (normal divergence handled by push merge).
 // Returns (true, nil) only when both exist and are truly disconnected.
-func IsMetadataDisconnected(repo *git.Repository) (bool, error) {
+func IsMetadataDisconnected(ctx context.Context, repo *git.Repository) (bool, error) {
 	refName := plumbing.NewBranchReferenceName(paths.MetadataBranchName)
 	localRef, err := repo.Reference(refName, true)
 	if errors.Is(err, plumbing.ErrReferenceNotFound) {
@@ -53,7 +53,7 @@ func IsMetadataDisconnected(repo *git.Repository) (bool, error) {
 		return false, err
 	}
 
-	return isDisconnected(repoPath, localRef.Hash().String(), remoteRef.Hash().String())
+	return isDisconnected(ctx, repoPath, localRef.Hash().String(), remoteRef.Hash().String())
 }
 
 // WarnIfMetadataDisconnected checks (once per process) whether the metadata
@@ -61,11 +61,12 @@ func IsMetadataDisconnected(repo *git.Repository) (bool, error) {
 // It does NOT fix the problem — users are directed to 'entire doctor'.
 func WarnIfMetadataDisconnected() {
 	disconnectedOnce.Do(func() {
-		repo, err := OpenRepository(context.Background())
+		ctx := context.Background()
+		repo, err := OpenRepository(ctx)
 		if err != nil {
 			return
 		}
-		disconnected, err := IsMetadataDisconnected(repo)
+		disconnected, err := IsMetadataDisconnected(ctx, repo)
 		if err != nil || !disconnected {
 			return
 		}
@@ -82,7 +83,7 @@ func WarnIfMetadataDisconnected() {
 // Repair strategy: cherry-pick local commits onto remote tip, preserving all data.
 // Checkpoint shards use unique paths (<id[:2]>/<id[2:]>/), so cherry-picks always
 // apply cleanly.
-func ReconcileDisconnectedMetadataBranch(repo *git.Repository) error {
+func ReconcileDisconnectedMetadataBranch(ctx context.Context, repo *git.Repository) error {
 	refName := plumbing.NewBranchReferenceName(paths.MetadataBranchName)
 
 	// Check local branch
@@ -118,7 +119,7 @@ func ReconcileDisconnectedMetadataBranch(repo *git.Repository) error {
 		return err
 	}
 
-	disconnected, err := isDisconnected(repoPath, localHash.String(), remoteHash.String())
+	disconnected, err := isDisconnected(ctx, repoPath, localHash.String(), remoteHash.String())
 	if err != nil {
 		return fmt.Errorf("failed to check metadata branch ancestry: %w", err)
 	}
@@ -183,8 +184,8 @@ func ReconcileDisconnectedMetadataBranch(repo *git.Repository) error {
 //   - 0: common ancestor found (shared ancestry)
 //   - 1: no common ancestor (disconnected)
 //   - 128+: error (corrupt repo, invalid hash, etc.)
-func isDisconnected(repoPath, hashA, hashB string) (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func isDisconnected(ctx context.Context, repoPath, hashA, hashB string) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", "merge-base", hashA, hashB)
 	cmd.Dir = repoPath
@@ -324,7 +325,7 @@ func cherryPickOnto(repo *git.Repository, base plumbing.Hash, commits []*object.
 // createCherryPickCommit creates a new commit on top of parent, preserving the
 // original commit's message and author.
 func createCherryPickCommit(repo *git.Repository, treeHash, parent plumbing.Hash, original *object.Commit) (plumbing.Hash, error) {
-	authorName, authorEmail := GetGitAuthorFromRepo(repo)
+	committerName, committerEmail := GetGitAuthorFromRepo(repo)
 	now := time.Now()
 
 	commit := &object.Commit{
@@ -332,8 +333,8 @@ func createCherryPickCommit(repo *git.Repository, treeHash, parent plumbing.Hash
 		ParentHashes: []plumbing.Hash{parent},
 		Author:       original.Author,
 		Committer: object.Signature{
-			Name:  authorName,
-			Email: authorEmail,
+			Name:  committerName,
+			Email: committerEmail,
 			When:  now,
 		},
 		Message: original.Message,

@@ -144,7 +144,7 @@ func fetchAndMergeSessionsCommon(ctx context.Context, remote, branchName string)
 	// The fetch above updated the remote-tracking ref, so reconciliation
 	// can compare fresh local vs remote. If disconnected (empty-orphan bug),
 	// this cherry-picks local commits onto remote tip, updating the local ref.
-	if reconcileErr := ReconcileDisconnectedMetadataBranch(repo); reconcileErr != nil {
+	if reconcileErr := ReconcileDisconnectedMetadataBranch(ctx, repo); reconcileErr != nil {
 		fmt.Fprintf(os.Stderr, "[entire] Warning: metadata reconciliation failed: %v\n", reconcileErr)
 	}
 

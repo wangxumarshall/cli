@@ -300,7 +300,8 @@ func checkDisconnectedMetadata(cmd *cobra.Command, force bool) error {
 		return fmt.Errorf("failed to open repository: %w", err)
 	}
 
-	disconnected, err := strategy.IsMetadataDisconnected(repo)
+	ctx := cmd.Context()
+	disconnected, err := strategy.IsMetadataDisconnected(ctx, repo)
 	if err != nil {
 		return fmt.Errorf("could not check metadata branch state: %w", err)
 	}
@@ -338,7 +339,7 @@ func checkDisconnectedMetadata(cmd *cobra.Command, force bool) error {
 		}
 	}
 
-	if fixErr := strategy.ReconcileDisconnectedMetadataBranch(repo); fixErr != nil {
+	if fixErr := strategy.ReconcileDisconnectedMetadataBranch(ctx, repo); fixErr != nil {
 		return fmt.Errorf("failed to reconcile metadata branches: %w", fixErr)
 	}
 

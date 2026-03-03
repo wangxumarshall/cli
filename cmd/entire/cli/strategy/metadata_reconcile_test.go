@@ -53,7 +53,7 @@ func TestReconcileDisconnected_NoRemote(t *testing.T) {
 	}
 
 	// Should be a no-op (no remote)
-	if err := ReconcileDisconnectedMetadataBranch(repo); err != nil {
+	if err := ReconcileDisconnectedMetadataBranch(context.Background(), repo); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -71,7 +71,7 @@ func TestReconcileDisconnected_NoLocal(t *testing.T) {
 	}
 
 	// No local branch → no-op
-	if err := ReconcileDisconnectedMetadataBranch(repo); err != nil {
+	if err := ReconcileDisconnectedMetadataBranch(context.Background(), repo); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -93,7 +93,7 @@ func TestReconcileDisconnected_SameHash(t *testing.T) {
 	}
 
 	// Same hash → no-op
-	if err := ReconcileDisconnectedMetadataBranch(repo); err != nil {
+	if err := ReconcileDisconnectedMetadataBranch(context.Background(), repo); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -134,7 +134,7 @@ func TestReconcileDisconnected_SharedAncestry(t *testing.T) {
 	}
 
 	// Shared ancestry → no-op
-	if err := ReconcileDisconnectedMetadataBranch(repo); err != nil {
+	if err := ReconcileDisconnectedMetadataBranch(context.Background(), repo); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -181,7 +181,7 @@ func TestReconcileDisconnected_Disconnected(t *testing.T) {
 	}
 
 	// Run reconciliation
-	if err := ReconcileDisconnectedMetadataBranch(repo); err != nil {
+	if err := ReconcileDisconnectedMetadataBranch(context.Background(), repo); err != nil {
 		t.Fatalf("ReconcileDisconnectedMetadataBranch() failed: %v", err)
 	}
 
@@ -292,7 +292,7 @@ func TestReconcileDisconnected_MultipleLocalCheckpoints(t *testing.T) {
 	}
 
 	// Run reconciliation
-	if err := ReconcileDisconnectedMetadataBranch(repo); err != nil {
+	if err := ReconcileDisconnectedMetadataBranch(context.Background(), repo); err != nil {
 		t.Fatalf("ReconcileDisconnectedMetadataBranch() failed: %v", err)
 	}
 
@@ -410,7 +410,7 @@ func TestIsMetadataDisconnected_NoRemote(t *testing.T) {
 		t.Fatalf("failed to open repo: %v", err)
 	}
 
-	disconnected, err := IsMetadataDisconnected(repo)
+	disconnected, err := IsMetadataDisconnected(context.Background(), repo)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -431,7 +431,7 @@ func TestIsMetadataDisconnected_NoLocal(t *testing.T) {
 	}
 
 	// No local branch → false
-	disconnected, err := IsMetadataDisconnected(repo)
+	disconnected, err := IsMetadataDisconnected(context.Background(), repo)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -455,7 +455,7 @@ func TestIsMetadataDisconnected_SameHash(t *testing.T) {
 		t.Fatalf("EnsureMetadataBranch failed: %v", err)
 	}
 
-	disconnected, err := IsMetadataDisconnected(repo)
+	disconnected, err := IsMetadataDisconnected(context.Background(), repo)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -497,7 +497,7 @@ func TestIsMetadataDisconnected_SharedAncestry(t *testing.T) {
 		t.Fatalf("failed to re-open repo: %v", err)
 	}
 
-	disconnected, err := IsMetadataDisconnected(repo)
+	disconnected, err := IsMetadataDisconnected(context.Background(), repo)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -532,7 +532,7 @@ func TestIsMetadataDisconnected_Disconnected(t *testing.T) {
 		t.Fatalf("failed to open repo: %v", err)
 	}
 
-	disconnected, err := IsMetadataDisconnected(repo)
+	disconnected, err := IsMetadataDisconnected(context.Background(), repo)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -587,7 +587,7 @@ func TestReconcileDisconnected_ModifiedEntries(t *testing.T) {
 		t.Fatalf("failed to open repo: %v", err)
 	}
 
-	if err := ReconcileDisconnectedMetadataBranch(repo); err != nil {
+	if err := ReconcileDisconnectedMetadataBranch(context.Background(), repo); err != nil {
 		t.Fatalf("ReconcileDisconnectedMetadataBranch() failed: %v", err)
 	}
 
