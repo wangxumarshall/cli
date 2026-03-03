@@ -1216,8 +1216,8 @@ func TestEnsureMetadataBranch_DisconnectedBranchesNotReconciledInEnable(t *testi
 		t.Fatalf("EnsureMetadataBranch() failed: %v", err)
 	}
 
-	// EnsureMetadataBranch should NOT reconcile disconnected branches (that's now
-	// handled by ReconcileDisconnectedMetadataBranch at read/write time).
+	// EnsureMetadataBranch should NOT reconcile disconnected branches.
+	// Reconciliation happens at pre-push time or via 'entire doctor'.
 	// The local branch should be unchanged.
 	localRefAfter, err := repo.Reference(refName, true)
 	if err != nil {
@@ -1292,6 +1292,8 @@ func TestEnsureMetadataBranch_DoesNotFastForwardWhenBehind(t *testing.T) {
 	if localAfter.Hash() != localBefore.Hash() {
 		t.Error("EnsureMetadataBranch should not modify local branch with shared ancestry")
 	}
+}
+
 // buildCommittedTree creates a git tree with the sharded committed checkpoint layout
 // used by entire/checkpoints/v1. files is a map of path -> content relative to the tree root.
 // Example: {"a3/b2c4d5e6f7/0/prompt.txt": "Hello"} creates the nested directory structure.

@@ -46,28 +46,6 @@ const MaxCommitTraversalDepth = 1000
 // Each package needs its own package-scoped sentinel for git log iteration patterns.
 var errStop = errors.New("stop iteration")
 
-// reconcileOnce ensures metadata branch reconciliation runs at most once per process.
-// reconcileResult caches the outcome so all callers see the same error (or nil).
-var ( //nolint:gochecknoglobals // intentional per-process gate
-	reconcileOnce   sync.Once
-	reconcileResult error //nolint:errname // not a sentinel — cached function result
-)
-
-// EnsureMetadataReconciled checks for and repairs disconnected local/remote metadata
-// branches. Safe to call multiple times — uses sync.Once internally.
-// Opens its own repository to avoid capturing a caller's repo instance forever.
-func EnsureMetadataReconciled() error {
-	reconcileOnce.Do(func() {
-		repo, err := OpenRepository(context.Background())
-		if err != nil {
-			reconcileResult = fmt.Errorf("failed to open repository for reconciliation: %w", err)
-			return
-		}
-		reconcileResult = ReconcileDisconnectedMetadataBranch(repo)
-	})
-	return reconcileResult
-}
-
 // IsEmptyRepository returns true if the repository has no commits yet.
 // After git-init, HEAD points to an unborn branch (e.g., refs/heads/main)
 // whose target does not yet exist. repo.Head() returns ErrReferenceNotFound
@@ -144,10 +122,8 @@ func ListCheckpoints(ctx context.Context) ([]CheckpointInfo, error) {
 		return nil, fmt.Errorf("failed to open git repository: %w", err)
 	}
 
-	// Ensure disconnected metadata branches are reconciled before reading
-	if reconcileErr := EnsureMetadataReconciled(); reconcileErr != nil {
-		fmt.Fprintf(os.Stderr, "[entire] Warning: %v\n", reconcileErr)
-	}
+	// Warn (once per process) if metadata branches are disconnected
+	WarnIfMetadataDisconnected()
 
 	refName := plumbing.NewBranchReferenceName(paths.MetadataBranchName)
 	ref, err := repo.Reference(refName, true)
@@ -338,8 +314,9 @@ func EnsureMetadataBranch(repo *git.Repository) error {
 				}
 				fmt.Fprintf(os.Stderr, "✓ Updated local branch '%s' from origin\n", paths.MetadataBranchName)
 			} else {
-				// Local has real data and differs from remote — reconciliation
-				// is handled by EnsureMetadataReconciled at read/write time
+				// Local has real data and differs from remote — if disconnected
+				// (no common ancestor), reconciliation happens at pre-push time
+				// or via 'entire doctor'. Read paths warn but do not auto-fix.
 				logging.Debug(context.Background(), "metadata branch differs from remote, reconciliation deferred to read/write time",
 					"local_hash", localRef.Hash().String()[:7],
 					"remote_hash", remoteRef.Hash().String()[:7],

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint"
@@ -15,6 +16,63 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
+
+// disconnectedOnce ensures the disconnection warning runs at most once per process.
+var disconnectedOnce sync.Once //nolint:gochecknoglobals // intentional per-process gate
+
+// IsMetadataDisconnected checks whether local and remote entire/checkpoints/v1
+// branches exist but share no common ancestor (the "empty-orphan bug").
+// Returns (false, nil) if either branch is missing, they point to the same hash,
+// or they share a common ancestor (normal divergence handled by push merge).
+// Returns (true, nil) only when both exist and are truly disconnected.
+func IsMetadataDisconnected(repo *git.Repository) (bool, error) {
+	refName := plumbing.NewBranchReferenceName(paths.MetadataBranchName)
+	localRef, err := repo.Reference(refName, true)
+	if errors.Is(err, plumbing.ErrReferenceNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to check local metadata branch: %w", err)
+	}
+
+	remoteRefName := plumbing.NewRemoteReferenceName("origin", paths.MetadataBranchName)
+	remoteRef, err := repo.Reference(remoteRefName, true)
+	if errors.Is(err, plumbing.ErrReferenceNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to check remote metadata branch: %w", err)
+	}
+
+	if localRef.Hash() == remoteRef.Hash() {
+		return false, nil
+	}
+
+	repoPath, err := getRepoPath(repo)
+	if err != nil {
+		return false, err
+	}
+
+	return isDisconnected(repoPath, localRef.Hash().String(), remoteRef.Hash().String())
+}
+
+// WarnIfMetadataDisconnected checks (once per process) whether the metadata
+// branch is disconnected and prints a warning to stderr if so.
+// It does NOT fix the problem — users are directed to 'entire doctor'.
+func WarnIfMetadataDisconnected() {
+	disconnectedOnce.Do(func() {
+		repo, err := OpenRepository(context.Background())
+		if err != nil {
+			return
+		}
+		disconnected, err := IsMetadataDisconnected(repo)
+		if err != nil || !disconnected {
+			return
+		}
+		fmt.Fprintln(os.Stderr, "[entire] Warning: Local and remote session metadata branches are disconnected.")
+		fmt.Fprintln(os.Stderr, "[entire] Some checkpoints from remote may not be visible. Run 'entire doctor' to fix.")
+	})
+}
 
 // ReconcileDisconnectedMetadataBranch detects and repairs disconnected local/remote
 // entire/checkpoints/v1 branches. Disconnected means no common ancestor, which

@@ -374,6 +374,173 @@ func TestReconcileDisconnected_MultipleLocalCheckpoints(t *testing.T) {
 	}
 }
 
+func TestIsMetadataDisconnected_NoRemote(t *testing.T) {
+	t.Parallel()
+
+	// Local-only repo with metadata branch, no remote tracking branch
+	tmpDir := t.TempDir()
+	run := func(args ...string) {
+		cmd := exec.CommandContext(context.Background(), "git", args...)
+		cmd.Dir = tmpDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-b", "main")
+	run("config", "user.email", "test@test.com")
+	run("config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("# Test"), 0o644); err != nil {
+		t.Fatalf("failed to write: %v", err)
+	}
+	run("add", ".")
+	run("commit", "-m", "init")
+
+	// Create orphan metadata branch
+	run("checkout", "--orphan", paths.MetadataBranchName)
+	run("rm", "-rf", ".")
+	if err := os.WriteFile(filepath.Join(tmpDir, "metadata.json"), []byte(`{"test":true}`), 0o644); err != nil {
+		t.Fatalf("failed to write: %v", err)
+	}
+	run("add", ".")
+	run("commit", "-m", "checkpoint")
+	run("checkout", "main")
+
+	repo, err := git.PlainOpenWithOptions(tmpDir, &git.PlainOpenOptions{EnableDotGitCommonDir: true})
+	if err != nil {
+		t.Fatalf("failed to open repo: %v", err)
+	}
+
+	disconnected, err := IsMetadataDisconnected(repo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if disconnected {
+		t.Error("expected false (no remote), got true")
+	}
+}
+
+func TestIsMetadataDisconnected_NoLocal(t *testing.T) {
+	t.Parallel()
+
+	bareDir := initBareWithMetadataBranch(t)
+	cloneDir, _ := cloneWithConfig(t, bareDir)
+
+	repo, err := git.PlainOpenWithOptions(cloneDir, &git.PlainOpenOptions{EnableDotGitCommonDir: true})
+	if err != nil {
+		t.Fatalf("failed to open repo: %v", err)
+	}
+
+	// No local branch → false
+	disconnected, err := IsMetadataDisconnected(repo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if disconnected {
+		t.Error("expected false (no local), got true")
+	}
+}
+
+func TestIsMetadataDisconnected_SameHash(t *testing.T) {
+	t.Parallel()
+
+	bareDir := initBareWithMetadataBranch(t)
+	cloneDir, _ := cloneWithConfig(t, bareDir)
+
+	repo, err := git.PlainOpenWithOptions(cloneDir, &git.PlainOpenOptions{EnableDotGitCommonDir: true})
+	if err != nil {
+		t.Fatalf("failed to open repo: %v", err)
+	}
+
+	if err := EnsureMetadataBranch(repo); err != nil {
+		t.Fatalf("EnsureMetadataBranch failed: %v", err)
+	}
+
+	disconnected, err := IsMetadataDisconnected(repo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if disconnected {
+		t.Error("expected false (same hash), got true")
+	}
+}
+
+func TestIsMetadataDisconnected_SharedAncestry(t *testing.T) {
+	t.Parallel()
+
+	bareDir := initBareWithMetadataBranch(t)
+	cloneDir, run := cloneWithConfig(t, bareDir)
+
+	repo, err := git.PlainOpenWithOptions(cloneDir, &git.PlainOpenOptions{EnableDotGitCommonDir: true})
+	if err != nil {
+		t.Fatalf("failed to open repo: %v", err)
+	}
+
+	if err := EnsureMetadataBranch(repo); err != nil {
+		t.Fatalf("EnsureMetadataBranch failed: %v", err)
+	}
+
+	// Add a local commit on top (diverged, but shared ancestry)
+	run("checkout", paths.MetadataBranchName)
+	localDir := filepath.Join(cloneDir, "cd", "ef01234567")
+	if err := os.MkdirAll(localDir, 0o755); err != nil {
+		t.Fatalf("failed to create dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(localDir, "metadata.json"), []byte(`{"test":"local"}`), 0o644); err != nil {
+		t.Fatalf("failed to write: %v", err)
+	}
+	run("add", ".")
+	run("commit", "-m", "local checkpoint")
+	run("checkout", "main")
+
+	repo, err = git.PlainOpenWithOptions(cloneDir, &git.PlainOpenOptions{EnableDotGitCommonDir: true})
+	if err != nil {
+		t.Fatalf("failed to re-open repo: %v", err)
+	}
+
+	disconnected, err := IsMetadataDisconnected(repo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if disconnected {
+		t.Error("expected false (shared ancestry), got true")
+	}
+}
+
+func TestIsMetadataDisconnected_Disconnected(t *testing.T) {
+	t.Parallel()
+
+	bareDir := initBareWithMetadataBranch(t)
+	cloneDir, run := cloneWithConfig(t, bareDir)
+
+	// Create a disconnected local metadata branch
+	run("checkout", "--orphan", "temp-orphan")
+	run("rm", "-rf", ".")
+	localDir := filepath.Join(cloneDir, "ab", "cdef012345")
+	if err := os.MkdirAll(localDir, 0o755); err != nil {
+		t.Fatalf("failed to create dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(localDir, "metadata.json"), []byte(`{"checkpoint_id":"abcdef012345"}`), 0o644); err != nil {
+		t.Fatalf("failed to write: %v", err)
+	}
+	run("add", ".")
+	run("commit", "-m", "Checkpoint: abcdef012345")
+	run("branch", "-f", paths.MetadataBranchName, "temp-orphan")
+	run("checkout", "main")
+
+	repo, err := git.PlainOpenWithOptions(cloneDir, &git.PlainOpenOptions{EnableDotGitCommonDir: true})
+	if err != nil {
+		t.Fatalf("failed to open repo: %v", err)
+	}
+
+	disconnected, err := IsMetadataDisconnected(repo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !disconnected {
+		t.Error("expected true (disconnected), got false")
+	}
+}
+
 func TestReconcileDisconnected_ModifiedEntries(t *testing.T) {
 	t.Parallel()
 
