@@ -164,11 +164,12 @@ func mergeDroidCustomModels(globalSettingsPath, repoSettingsPath string) error {
 	// Set the active custom model so interactive mode uses the BYOK model
 	// instead of prompting for selection. The value must match the Model
 	// field from the customModels entry (not the displayName).
-	repoSettings["model"] = json.RawMessage(`"` + agents.DroidCustomModelBaseID() + `"`)
+	repoSettings["model"] = json.RawMessage(`"` + agents.DefaultDroidModel() + `"`)
 
 	// High autonomy prevents Droid from asking for confirmation during
 	// interactive E2E tests, which would cause hangs waiting for input.
 	repoSettings["autonomyMode"] = json.RawMessage(`"auto-high"`)
+	repoSettings["completionSound"] = json.RawMessage(`"off"`)
 
 	out, err := json.MarshalIndent(repoSettings, "", "  ")
 	if err != nil {

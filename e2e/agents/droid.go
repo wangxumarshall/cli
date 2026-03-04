@@ -76,9 +76,9 @@ const (
 	defaultDroidModel           = "custom:" + droidCustomModelBaseID
 )
 
-// DroidCustomModelBaseID returns the base model ID used for BYOK configuration.
-// This is needed by repo setup to write the customModel field in settings.json.
-func DroidCustomModelBaseID() string { return droidCustomModelBaseID }
+// DefaultDroidModel returns the default model string for Droid BYOK configuration.
+// Format is "custom:<baseModelID>" which the Droid API expects for custom model selection.
+func DefaultDroidModel() string { return defaultDroidModel }
 
 func (d *Droid) Bootstrap() error {
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
