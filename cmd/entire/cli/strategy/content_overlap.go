@@ -434,31 +434,26 @@ func filesWithRemainingAgentChanges(
 	var remaining []string
 
 	for _, filePath := range filesTouched {
-		// If file wasn't committed, check if it actually exists in the shadow tree.
-		// Transcript parsers capture file paths from all tool calls, including ones
-		// that were attempted but never created (e.g. agent writes src/types.go then
-		// creates src/types/types.go instead). buildTreeWithChanges skips non-existent
-		// files, so the shadow tree is the ground truth. Without this check, phantom
-		// paths cause infinite carry-forward loops.
-		if _, wasCommitted := committedFiles[filePath]; !wasCommitted {
-			if _, err := shadowTree.File(filePath); err != nil {
-				logging.Debug(logCtx, "filesWithRemainingAgentChanges: file not committed and not in shadow tree, skipping",
-					slog.String("file", filePath),
-				)
-				continue
-			}
-			remaining = append(remaining, filePath)
-			logging.Debug(logCtx, "filesWithRemainingAgentChanges: file not committed, keeping",
+		// Skip files absent from the shadow tree — nothing to carry forward.
+		// This covers two cases:
+		//  1. Phantom paths: transcript mentions files the agent never created
+		//     (e.g. agent writes src/types.go then creates src/types/types.go).
+		//  2. Agent deletions: file was deleted on disk, so buildTreeWithChanges
+		//     excluded it from the shadow tree. Carrying it forward would be a
+		//     no-op since there's no content on disk to snapshot.
+		// Without this check, phantom paths cause infinite carry-forward loops.
+		shadowFile, err := shadowTree.File(filePath)
+		if err != nil {
+			logging.Debug(logCtx, "filesWithRemainingAgentChanges: file not in shadow tree, skipping",
 				slog.String("file", filePath),
 			)
 			continue
 		}
 
-		// File was committed - check if committed content matches shadow branch
-		shadowFile, err := shadowTree.File(filePath)
-		if err != nil {
-			// File not in shadow branch - nothing to carry forward for this file
-			logging.Debug(logCtx, "filesWithRemainingAgentChanges: file not in shadow branch, skipping",
+		// File wasn't committed at all — it has remaining changes
+		if _, wasCommitted := committedFiles[filePath]; !wasCommitted {
+			remaining = append(remaining, filePath)
+			logging.Debug(logCtx, "filesWithRemainingAgentChanges: file not committed, keeping",
 				slog.String("file", filePath),
 			)
 			continue
