@@ -13,18 +13,9 @@ import (
 // The As* helpers in the agent package use DeclaredCapabilities() to gate access,
 // so callers only see capabilities the external binary actually declared.
 func Wrap(ea *Agent) agent.Agent {
-	caps := ea.info.Capabilities
 	return &wrappedAgent{
-		ea: ea,
-		caps: agent.DeclaredCaps{
-			Hooks:                  caps.Hooks,
-			TranscriptAnalyzer:     caps.TranscriptAnalyzer,
-			TranscriptPreparer:     caps.TranscriptPreparer,
-			TokenCalculator:        caps.TokenCalculator,
-			TextGenerator:          caps.TextGenerator,
-			HookResponseWriter:     caps.HookResponseWriter,
-			SubagentAwareExtractor: caps.SubagentAwareExtractor,
-		},
+		ea:   ea,
+		caps: ea.info.Capabilities,
 	}
 }
 

@@ -16,25 +16,14 @@ const ProtocolVersion = 1
 
 // InfoResponse is the JSON returned by the "info" subcommand.
 type InfoResponse struct {
-	ProtocolVersion int          `json:"protocol_version"`
-	Name            string       `json:"name"`
-	Type            string       `json:"type"`
-	Description     string       `json:"description"`
-	IsPreview       bool         `json:"is_preview"`
-	ProtectedDirs   []string     `json:"protected_dirs"`
-	HookNames       []string     `json:"hook_names"`
-	Capabilities    Capabilities `json:"capabilities"`
-}
-
-// Capabilities declares which optional interfaces the external agent supports.
-type Capabilities struct {
-	Hooks                  bool `json:"hooks"`
-	TranscriptAnalyzer     bool `json:"transcript_analyzer"`
-	TranscriptPreparer     bool `json:"transcript_preparer"`
-	TokenCalculator        bool `json:"token_calculator"`
-	TextGenerator          bool `json:"text_generator"`
-	HookResponseWriter     bool `json:"hook_response_writer"`
-	SubagentAwareExtractor bool `json:"subagent_aware_extractor"`
+	ProtocolVersion int                `json:"protocol_version"`
+	Name            string             `json:"name"`
+	Type            string             `json:"type"`
+	Description     string             `json:"description"`
+	IsPreview       bool               `json:"is_preview"`
+	ProtectedDirs   []string           `json:"protected_dirs"`
+	HookNames       []string           `json:"hook_names"`
+	Capabilities    agent.DeclaredCaps `json:"capabilities"`
 }
 
 // DetectResponse is the JSON returned by the "detect" subcommand.

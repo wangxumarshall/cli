@@ -13,14 +13,16 @@ type CapabilityDeclarer interface {
 }
 
 // DeclaredCaps enumerates the optional interfaces an agent claims to support.
+// JSON tags match the external agent protocol schema so external.InfoResponse
+// can deserialize directly into this type.
 type DeclaredCaps struct {
-	Hooks                  bool
-	TranscriptAnalyzer     bool
-	TranscriptPreparer     bool
-	TokenCalculator        bool
-	TextGenerator          bool
-	HookResponseWriter     bool
-	SubagentAwareExtractor bool
+	Hooks                  bool `json:"hooks"`
+	TranscriptAnalyzer     bool `json:"transcript_analyzer"`
+	TranscriptPreparer     bool `json:"transcript_preparer"`
+	TokenCalculator        bool `json:"token_calculator"`
+	TextGenerator          bool `json:"text_generator"`
+	HookResponseWriter     bool `json:"hook_response_writer"`
+	SubagentAwareExtractor bool `json:"subagent_aware_extractor"`
 }
 
 // AsHookSupport returns the agent as HookSupport if it both implements the

@@ -428,8 +428,10 @@ func (e *Agent) run(ctx context.Context, stdin []byte, args ...string) ([]byte, 
 	const maxOutputBytes = 10 * 1024 * 1024 // 10 MB
 
 	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd.Stdout = &limitedWriter{buf: &stdoutBuf, limit: maxOutputBytes}
-	cmd.Stderr = &limitedWriter{buf: &stderrBuf, limit: maxOutputBytes}
+	stdoutLW := &limitedWriter{buf: &stdoutBuf, limit: maxOutputBytes}
+	stderrLW := &limitedWriter{buf: &stderrBuf, limit: maxOutputBytes}
+	cmd.Stdout = stdoutLW
+	cmd.Stderr = stderrLW
 
 	if err := cmd.Run(); err != nil {
 		errMsg := strings.TrimSpace(stderrBuf.String())
@@ -437,6 +439,10 @@ func (e *Agent) run(ctx context.Context, stdin []byte, args ...string) ([]byte, 
 			return nil, fmt.Errorf("%s: %s", args[0], errMsg)
 		}
 		return nil, fmt.Errorf("%s: %w", args[0], err)
+	}
+
+	if stdoutLW.truncated {
+		return nil, fmt.Errorf("%s: output exceeded %d byte limit", args[0], maxOutputBytes)
 	}
 
 	return stdoutBuf.Bytes(), nil
@@ -447,17 +453,20 @@ func (e *Agent) run(ctx context.Context, stdin []byte, args ...string) ([]byte, 
 // limitedWriter wraps a bytes.Buffer and stops writing after limit bytes,
 // preventing unbounded memory growth from external process output.
 type limitedWriter struct {
-	buf   *bytes.Buffer
-	limit int
+	buf       *bytes.Buffer
+	limit     int
+	truncated bool
 }
 
 func (w *limitedWriter) Write(p []byte) (int, error) {
 	remaining := w.limit - w.buf.Len()
 	if remaining <= 0 {
+		w.truncated = true
 		return len(p), nil // discard, but report success so the process isn't killed
 	}
 	if len(p) > remaining {
 		p = p[:remaining]
+		w.truncated = true
 	}
 	n, err := w.buf.Write(p)
 	if err != nil {
