@@ -9,7 +9,7 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
-  actions: read
+  actions: write
 
 concurrency:
   group: e2e-triage
@@ -19,7 +19,7 @@ jobs:
   triage:
     if: ${{ github.event.workflow_run.conclusion == 'failure' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -78,8 +78,10 @@ jobs:
             --allowedTools "Bash(mise run *),Bash(gh *),Bash(git *),Read,Write,Edit,Glob,Grep" \
             "You are triaging E2E test failures from CI run ${WORKFLOW_RUN_ID}.
              Follow the /e2e-triage skill instructions in .claude/skills/e2e-triage/SKILL.md.
+             You are in CI mode (WORKFLOW_RUN_ID is set). Use the CI mode steps.
              Artifact directory: ${ARTIFACT_DIR}
              CI run URL: ${WORKFLOW_RUN_URL}
+             Re-run failing tests using the e2e-isolated.yml workflow via gh workflow run.
              Do NOT ask questions — act autonomously.
              For flaky fixes: create a PR.
              For real bugs: create or comment on GitHub issues.
