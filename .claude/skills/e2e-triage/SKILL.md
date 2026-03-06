@@ -130,15 +130,19 @@ Use **re-run results as the primary signal**, supplemented by artifact analysis.
 
 | Original | Re-run 1 | Re-run 2 | Classification |
 |----------|----------|----------|----------------|
-| FAIL | FAIL (same error) | FAIL (same error) | **real-bug** |
+| FAIL | FAIL (same error) | FAIL (same error) | **real-bug** OR **flaky (test-bug)** — see below |
 | FAIL | PASS | PASS | **flaky** |
 | FAIL | PASS | FAIL | **flaky** (non-deterministic) |
 | FAIL | FAIL | PASS | **flaky** (non-deterministic) |
 | FAIL | FAIL (different error) | FAIL (different error) | **needs deeper analysis** — examine artifacts |
 
-#### Strong `real-bug` signals (supplement re-runs):
+**Important: Consistent failures can still be `flaky` (test-bug).** When all re-runs fail, check *where* the root cause is:
+- Root cause in `cmd/entire/cli/` → **real-bug** (product code is broken)
+- Root cause in `e2e/` (test infra, test helpers, tmux setup, env propagation) → **flaky (test-bug)** — the CLI works fine, the test is broken
 
-- `entire.log` contains `"level":"ERROR"` or panic/stack traces
+#### Strong `real-bug` signals (root cause must be in `cmd/entire/cli/`, not `e2e/`):
+
+- `entire.log` contains `"level":"ERROR"` or panic/stack traces from CLI code
 - Checkpoint metadata structurally corrupt (malformed JSON, missing `checkpoint_id`/`strategy`)
 - Session state file missing or malformed when expected
 - Hooks did not fire at all (no `hook invoked` log entries)
@@ -146,8 +150,11 @@ Use **re-run results as the primary signal**, supplemented by artifact analysis.
 - Same test fails across 3+ agents with same non-timeout symptom
 - Error references CLI code (panic in `cmd/entire/cli/`)
 
+**Key question:** Is the bug in `cmd/entire/cli/` (product code) or in `e2e/` (test code)? Only the former is a `real-bug`.
+
 #### Strong `flaky` signals (unless overridden by real-bug):
 
+**Agent behavior (non-deterministic):**
 - `signal: killed` (timeout)
 - `context deadline exceeded` or `WaitForCheckpoint.*exceeded deadline`
 - Agent asked for confirmation instead of acting
@@ -155,6 +162,14 @@ Use **re-run results as the primary signal**, supplemented by artifact analysis.
 - Agent produced no output
 - Agent committed when it shouldn't have (or vice versa)
 - Duration near timeout limit
+
+**Test-bug (consistent failure, but root cause is in `e2e/` not `cmd/entire/cli/`):**
+- Agent "Not logged in" / auth errors → test env setup doesn't propagate auth credentials
+- Env vars not propagated to agent session → tmux/test harness bug
+- Error references test code (`e2e/`) not CLI code (`cmd/entire/cli/`)
+- Test helper logic errors (wrong assertions, bad globs, incorrect expected values)
+- Consistent failure BUT root cause traced to `e2e/` code, not `cmd/entire/cli/`
+- Test setup/teardown issues (missing git config, temp dir cleanup, port conflicts)
 
 #### Ambiguous cases:
 
@@ -188,10 +203,12 @@ For each test+agent pair, print a findings block:
 
 #### For `flaky` failures: describe the proposed fix
 
+For agent-behavior flaky issues, fixes typically modify test prompts. For test-bug flaky issues, fixes target `e2e/` infrastructure code (harness setup, helpers, env propagation).
+
 ```
 **Proposed fix:** <description>
-  - File: <path to test file>
-  - Change: <what will be modified — e.g., append "Do not ask for confirmation" to prompt>
+  - File: <path to test file or e2e infrastructure file>
+  - Change: <what will be modified — e.g., append "Do not ask for confirmation" to prompt, or fix env propagation in NewTmuxSession>
 ```
 
 Common flaky fixes (same as CI mode):
@@ -200,6 +217,9 @@ Common flaky fixes (same as CI mode):
 - Agent committed when shouldn't -> add "Do not commit" to prompt
 - Checkpoint wait timeout -> increase timeout argument
 - Agent timeout (signal: killed) -> increase per-test timeout, simplify prompt
+- Auth/env not propagated -> fix test harness env setup in `e2e/` code
+- Test helper bug (wrong assertion, bad glob) -> fix test helper in `e2e/`
+- tmux session setup issue -> fix `NewTmuxSession` or session config in `e2e/`
 
 #### For `real-bug` failures: describe root cause analysis
 
@@ -252,6 +272,9 @@ For **real-bug** fixes the user approved:
    - Agent committed when shouldn't -> add "Do not commit" to prompt
    - Checkpoint wait timeout -> increase timeout argument
    - Agent timeout (signal: killed) -> increase per-test timeout, simplify prompt
+   - Auth/env not propagated -> fix test harness env setup in `e2e/` code
+   - Test helper bug (wrong assertion, bad glob) -> fix test helper in `e2e/`
+   - tmux session setup issue -> fix `NewTmuxSession` or session config in `e2e/`
 3. Run verification:
    ```bash
    mise run test:e2e:canary   # Must pass
