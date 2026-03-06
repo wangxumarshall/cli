@@ -1,13 +1,15 @@
 ---
 name: e2e-triage
-description: Triage E2E test failures — run locally with mise or via CI re-runs, classify flaky vs real bug, create PRs for flaky fixes and GitHub issues for real bugs
+description: Triage E2E test failures — run locally with mise or via CI re-runs, classify flaky vs real bug. Local mode presents findings and applies fixes in-place; CI mode creates PRs for flaky fixes and GitHub issues for real bugs.
 ---
 
 # E2E Triage
 
-Triage E2E test failures with **re-run verification**. Operates in two modes (auto-detected), analyzes artifacts, re-runs failing tests to distinguish flaky from real bugs, then takes action: batched PR for flaky fixes, GitHub issues for real bugs.
+Triage E2E test failures with **re-run verification**. Operates in two modes (auto-detected), analyzes artifacts, and re-runs failing tests to distinguish flaky from real bugs. **Local mode** presents findings interactively and applies fixes directly in the working tree. **CI mode** creates batched PRs for flaky fixes and GitHub issues for real bugs.
 
 ## Mode Detection
+
+The two modes share the same analysis and classification logic but differ in how results are presented and acted upon. Local mode is interactive (user reviews findings, chooses what to fix); CI mode is automated (PRs and issues created directly).
 
 - **CI mode**: `WORKFLOW_RUN_ID` env var is set (injected by `e2e-triage.yml`)
 - **Local mode**: No `WORKFLOW_RUN_ID` — user invokes `/e2e-triage` manually
@@ -167,7 +169,79 @@ Before acting, check correlations using re-run data:
 - Same test fails for multiple agents, but re-runs pass -> **flaky** (shared prompt issue)
 - One agent fails consistently, others pass -> agent-specific issue (still **real-bug** if re-runs confirm)
 
-### Step 4: Take Action
+### Step 4a: Take Action — Local Mode
+
+In local mode, present findings interactively. **Do not** create branches, PRs, or GitHub issues.
+
+#### Present Findings Report
+
+For each test+agent pair, print a findings block:
+
+```
+## <TestName> (<agent>) — <classification>
+
+**Re-run results:** original=FAIL, rerun1=PASS, rerun2=PASS
+**Evidence:**
+- <1-2 sentence summary of what went wrong>
+- <key artifact evidence: entire.log excerpt, console.log excerpt, etc.>
+```
+
+#### For `flaky` failures: describe the proposed fix
+
+```
+**Proposed fix:** <description>
+  - File: <path to test file>
+  - Change: <what will be modified — e.g., append "Do not ask for confirmation" to prompt>
+```
+
+Common flaky fixes (same as CI mode):
+- Agent asked for confirmation -> append "Do not ask for confirmation" to prompt
+- Agent wrote to wrong path -> be more explicit about paths in prompt
+- Agent committed when shouldn't -> add "Do not commit" to prompt
+- Checkpoint wait timeout -> increase timeout argument
+- Agent timeout (signal: killed) -> increase per-test timeout, simplify prompt
+
+#### For `real-bug` failures: describe root cause analysis
+
+```
+**Root cause analysis:**
+  - Component: <hooks | session | checkpoint | strategy | agent>
+  - Suspected location: <file:function>
+  - Description: <what's wrong and why>
+  - Proposed fix: <what code change would address it>
+```
+
+#### Ask the user
+
+Prompt the user:
+
+> **Should I fix these?**
+> - [list of tests with classifications]
+> - You can select all, specific tests, or skip.
+
+Wait for user response before proceeding.
+
+#### Apply fixes (if user approves)
+
+For **flaky** fixes the user approved:
+1. Apply fixes directly in the working tree (no branch creation)
+2. Run verification:
+   ```bash
+   mise run test:e2e:canary   # Must pass
+   mise run fmt && mise run lint
+   ```
+3. If canary fails, investigate and adjust. Report what happened to the user.
+
+For **real-bug** fixes the user approved:
+1. Apply the fix directly in the working tree (no branch creation)
+2. Run relevant tests to verify:
+   ```bash
+   mise run test        # Unit tests
+   mise run test:e2e:canary  # Canary tests
+   ```
+3. Report results to the user.
+
+### Step 4b: Take Action — CI Mode
 
 #### For `flaky` failures: Batched PR
 
@@ -221,6 +295,21 @@ Before acting, check correlations using re-run data:
    - Suspected fix location (file, function, reason)
 
 ### Step 5: Summary Report
+
+#### Local mode
+
+Print a summary table:
+```
+| Test | Agent(s) | Re-runs | Classification | Action Taken |
+|------|----------|---------|---------------|-------------|
+| TestFoo | claude-code | FAIL/PASS/PASS | flaky | Fixed in working tree |
+| TestBar | all agents | FAIL/FAIL/FAIL | real-bug | Fix applied, tests passing |
+| TestBaz | opencode | FAIL/PASS/FAIL | flaky | Skipped (user declined) |
+```
+
+No `triage-summary.json` is written in local mode.
+
+#### CI mode
 
 Print a summary table:
 ```
