@@ -74,16 +74,20 @@ func (s *Span) End() {
 		attrs = append(attrs, slog.Bool("error", true))
 	}
 
-	// Add child step durations (and error flags) as flat keys
+	// Add child step durations (and error flags) as flat keys.
+	// Disambiguate duplicate child names (from loops) with .1, .2, etc. suffixes
+	// to prevent later values from overwriting earlier ones in JSON output.
+	seen := make(map[string]int, len(s.children))
 	for _, child := range s.children {
 		// Auto-end children that were not explicitly ended
 		if !child.ended {
 			child.End()
 		}
-		key := fmt.Sprintf("steps.%s_ms", child.name)
+		stepKey := childStepKey(child.name, seen)
+		key := fmt.Sprintf("steps.%s_ms", stepKey)
 		attrs = append(attrs, slog.Int64(key, child.duration.Milliseconds()))
 		if child.err != nil {
-			errKey := fmt.Sprintf("steps.%s_err", child.name)
+			errKey := fmt.Sprintf("steps.%s_err", stepKey)
 			attrs = append(attrs, slog.Bool(errKey, true))
 		}
 	}
@@ -94,4 +98,16 @@ func (s *Span) End() {
 	}
 
 	logging.Debug(logCtx, "perf", attrs...)
+}
+
+// childStepKey returns a unique key for a child span name.
+// First occurrence keeps the original name; subsequent get .1, .2, etc.
+// The seen map is updated in place.
+func childStepKey(name string, seen map[string]int) string {
+	n := seen[name]
+	seen[name] = n + 1
+	if n == 0 {
+		return name
+	}
+	return fmt.Sprintf("%s.%d", name, n)
 }
