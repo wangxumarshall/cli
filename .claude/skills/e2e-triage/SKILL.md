@@ -15,6 +15,18 @@ The user provides one or more of:
 - **Test name(s)** — e.g., `TestInteractiveMultiStep`
 - **`--agent <agent>`** — optional, defaults to all agents that previously failed
 - **A local artifact path** — skip straight to analysis of existing artifacts
+- **CI run reference** — triggers artifact download instead of local re-runs:
+  - `latest CI run` / `latest` — most recent failed E2E run on main
+  - A GitHub Actions run ID (numeric, e.g., `12345678`)
+  - A GitHub Actions run URL
+
+**CI artifact download:** When a CI run reference is provided, download artifacts using:
+
+```bash
+scripts/download-e2e-artifacts.sh <latest | RUN_ID | RUN_URL>
+```
+
+The script outputs the absolute artifact path as its **last line of stdout** — capture that and use it as the artifact path for analysis. After downloading, **skip Steps L2–L5** (local re-runs) and go straight to **Shared Analysis** (Step 1), since we're analyzing CI artifacts, not running tests locally.
 
 **Cost warning:** Real E2E tests consume API tokens. Before running, confirm with the user unless they provided specific test names (implying intent to run).
 
