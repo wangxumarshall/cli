@@ -14,6 +14,7 @@ import (
 	_ "github.com/entireio/cli/cmd/entire/cli/agent/cursor"
 	_ "github.com/entireio/cli/cmd/entire/cli/agent/factoryaidroid"
 	_ "github.com/entireio/cli/cmd/entire/cli/agent/geminicli"
+	_ "github.com/entireio/cli/cmd/entire/cli/agent/iflow"
 	_ "github.com/entireio/cli/cmd/entire/cli/agent/opencode"
 	_ "github.com/entireio/cli/cmd/entire/cli/agent/traeagent"
 	_ "github.com/entireio/cli/cmd/entire/cli/agent/vogon"

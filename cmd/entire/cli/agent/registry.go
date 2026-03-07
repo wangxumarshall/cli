@@ -105,6 +105,7 @@ const (
 	AgentNameCursor         types.AgentName = "cursor"
 	AgentNameFactoryAIDroid types.AgentName = "factoryai-droid"
 	AgentNameGemini         types.AgentName = "gemini"
+	AgentNameIFlow          types.AgentName = "iflow"
 	AgentNameOpenCode       types.AgentName = "opencode"
 	AgentNameTraeAgent      types.AgentName = "trae-agent"
 )
@@ -116,6 +117,7 @@ const (
 	AgentTypeCursor         types.AgentType = "Cursor"
 	AgentTypeFactoryAIDroid types.AgentType = "Factory AI Droid"
 	AgentTypeGemini         types.AgentType = "Gemini CLI"
+	AgentTypeIFlow          types.AgentType = "iFlow CLI"
 	AgentTypeOpenCode       types.AgentType = "OpenCode"
 	AgentTypeTraeAgent      types.AgentType = "Trae Agent"
 	AgentTypeUnknown        types.AgentType = "Agent" // Fallback for backwards compatibility
