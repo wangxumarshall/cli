@@ -6,12 +6,21 @@ import "time"
 type HookType string
 
 const (
-	HookSessionStart     HookType = "session_start"
-	HookSessionEnd       HookType = "session_end"
-	HookUserPromptSubmit HookType = "user_prompt_submit"
-	HookStop             HookType = "stop"
-	HookPreToolUse       HookType = "pre_tool_use"
-	HookPostToolUse      HookType = "post_tool_use"
+	HookSessionStart        HookType = "session_start"
+	HookSessionEnd          HookType = "session_end"
+	HookUserPromptSubmit    HookType = "user_prompt_submit"
+	HookStop                HookType = "stop"
+	HookPreToolUse          HookType = "pre_tool_use"
+	HookPostToolUse         HookType = "post_tool_use"
+	HookBeforeAgent         HookType = "before_agent"
+	HookAfterAgent          HookType = "after_agent"
+	HookBeforeModel         HookType = "before_model"
+	HookAfterModel          HookType = "after_model"
+	HookBeforeToolSelection HookType = "before_tool_selection"
+	HookPreTool             HookType = "pre_tool"
+	HookAfterTool           HookType = "after_tool"
+	HookPreCompress         HookType = "pre_compress"
+	HookNotification        HookType = "notification"
 )
 
 // HookInput contains normalized data from hook callbacks
