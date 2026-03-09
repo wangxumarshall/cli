@@ -1,0 +1,86 @@
+{
+  "hooks": {
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "entire hooks iflow notification"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "entire hooks iflow post-tool-use"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "entire hooks iflow pre-tool-use"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "type": "command",
+        "command": "entire hooks iflow session-end"
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "entire hooks iflow session-start"
+          }
+        ]
+      }
+    ],
+    "SetUpEnvironment": [
+      {
+        "type": "command",
+        "command": "entire hooks iflow set-up-environment"
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "entire hooks iflow stop"
+      }
+    ],
+    "SubagentStop": [
+      {
+        "type": "command",
+        "command": "entire hooks iflow subagent-stop"
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "entire hooks iflow user-prompt-submit"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "deny": [
+      "Read(./.entire/metadata/**)"
+    ]
+  }
+}
