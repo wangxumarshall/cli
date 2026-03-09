@@ -63,8 +63,8 @@ func TestExtractModifiedFiles(t *testing.T) {
 			Type:      "tool_use",
 			Timestamp: "2024-01-01T00:00:00Z",
 			ToolUse: &ToolUse{
-				ID:   "tool-1",
-				Name: "write_file",
+				ID:    "tool-1",
+				Name:  "write_file",
 				Input: json.RawMessage(`{"file_path": "file1.txt"}`),
 			},
 		},
@@ -72,8 +72,8 @@ func TestExtractModifiedFiles(t *testing.T) {
 			Type:      "tool_use",
 			Timestamp: "2024-01-01T00:00:01Z",
 			ToolUse: &ToolUse{
-				ID:   "tool-2",
-				Name: "replace",
+				ID:    "tool-2",
+				Name:  "replace",
 				Input: json.RawMessage(`{"path": "file2.txt"}`),
 			},
 		},
@@ -81,8 +81,8 @@ func TestExtractModifiedFiles(t *testing.T) {
 			Type:      "tool_use",
 			Timestamp: "2024-01-01T00:00:02Z",
 			ToolUse: &ToolUse{
-				ID:   "tool-3",
-				Name: "read_file",
+				ID:    "tool-3",
+				Name:  "read_file",
 				Input: json.RawMessage(`{"file_path": "file3.txt"}`),
 			},
 		},
@@ -117,8 +117,8 @@ func TestExtractModifiedFiles_Duplicates(t *testing.T) {
 			Type:      "tool_use",
 			Timestamp: "2024-01-01T00:00:00Z",
 			ToolUse: &ToolUse{
-				ID:   "tool-1",
-				Name: "write_file",
+				ID:    "tool-1",
+				Name:  "write_file",
 				Input: json.RawMessage(`{"file_path": "same.txt"}`),
 			},
 		},
@@ -126,8 +126,8 @@ func TestExtractModifiedFiles_Duplicates(t *testing.T) {
 			Type:      "tool_use",
 			Timestamp: "2024-01-01T00:00:01Z",
 			ToolUse: &ToolUse{
-				ID:   "tool-2",
-				Name: "write_file",
+				ID:    "tool-2",
+				Name:  "write_file",
 				Input: json.RawMessage(`{"file_path": "same.txt"}`),
 			},
 		},
@@ -243,15 +243,15 @@ func TestFindCheckpointLine(t *testing.T) {
 	lines := []TranscriptLine{
 		{Type: "user", Timestamp: "2024-01-01T00:00:00Z"},
 		{
-			Type:        "tool_result",
-			Timestamp:   "2024-01-01T00:00:01Z",
-			ToolResult:  &ToolResult{ToolUseID: "tool-1"},
+			Type:       "tool_result",
+			Timestamp:  "2024-01-01T00:00:01Z",
+			ToolResult: &ToolResult{ToolUseID: "tool-1"},
 		},
 		{Type: "assistant", Timestamp: "2024-01-01T00:00:02Z"},
 		{
-			Type:        "tool_result",
-			Timestamp:   "2024-01-01T00:00:03Z",
-			ToolResult:  &ToolResult{ToolUseID: "tool-2"},
+			Type:       "tool_result",
+			Timestamp:  "2024-01-01T00:00:03Z",
+			ToolResult: &ToolResult{ToolUseID: "tool-2"},
 		},
 	}
 

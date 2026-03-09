@@ -4,8 +4,8 @@ import "encoding/json"
 
 // IFlowSettings represents the .iflow/settings.json structure
 type IFlowSettings struct {
-	Hooks       IFlowHooks            `json:"hooks,omitempty"`
-	Permissions IFlowPermissions      `json:"permissions,omitempty"`
+	Hooks       IFlowHooks       `json:"hooks,omitempty"`
+	Permissions IFlowPermissions `json:"permissions,omitempty"`
 }
 
 // IFlowHooks contains the hook configurations
@@ -28,7 +28,7 @@ type IFlowPermissions struct {
 
 // IFlowHookMatcher matches hooks to specific patterns
 type IFlowHookMatcher struct {
-	Matcher string          `json:"matcher,omitempty"`
+	Matcher string           `json:"matcher,omitempty"`
 	Hooks   []IFlowHookEntry `json:"hooks"`
 }
 
@@ -56,6 +56,11 @@ type ToolHookInput struct {
 	ToolAliases  []string        `json:"tool_aliases,omitempty"`
 	ToolInput    json.RawMessage `json:"tool_input"`
 	ToolResponse json.RawMessage `json:"tool_response,omitempty"`
+}
+
+// ToolResponseContent represents the structure of tool_response.result
+type ToolResponseContent struct {
+	LLMContent string `json:"llmContent,omitempty"`
 }
 
 // UserPromptSubmitInput is the JSON structure from UserPromptSubmit hook
@@ -95,11 +100,21 @@ type SubagentStopInput struct {
 
 // TranscriptLine represents a single line in the JSONL transcript
 type TranscriptLine struct {
-	Type       string          `json:"type"`
-	Timestamp  string          `json:"timestamp"`
-	Message    json.RawMessage `json:"message,omitempty"`
-	ToolUse    *ToolUse        `json:"tool_use,omitempty"`
-	ToolResult *ToolResult     `json:"tool_result,omitempty"`
+	Type       string              `json:"type"`
+	Timestamp  string              `json:"timestamp"`
+	Message    json.RawMessage     `json:"message,omitempty"`
+	ToolUse    *ToolUse            `json:"tool_use,omitempty"`
+	ToolResult *ToolResult         `json:"tool_result,omitempty"`
+	Tokens     *IFlowMessageTokens `json:"tokens,omitempty"`
+}
+
+// IFlowMessageTokens represents token usage from an iFlow API response.
+// This structure may be present in transcript lines for assistant messages.
+type IFlowMessageTokens struct {
+	Input  int `json:"input,omitempty"`
+	Output int `json:"output,omitempty"`
+	Cached int `json:"cached,omitempty"`
+	Total  int `json:"total,omitempty"`
 }
 
 // ToolUse represents a tool invocation in the transcript
@@ -129,14 +144,14 @@ type FileWriteToolInput struct {
 
 // Tool names used in iFlow CLI transcripts
 const (
-	ToolWrite        = "write_file"
-	ToolEdit         = "replace"
-	ToolMultiEdit    = "multi_edit"
-	ToolShell        = "run_shell_command"
-	ToolRead         = "read_file"
-	ToolList         = "list_directory"
-	ToolSearch       = "search_file_content"
-	ToolGlob         = "glob"
+	ToolWrite     = "write_file"
+	ToolEdit      = "replace"
+	ToolMultiEdit = "multi_edit"
+	ToolShell     = "run_shell_command"
+	ToolRead      = "read_file"
+	ToolList      = "list_directory"
+	ToolSearch    = "search_file_content"
+	ToolGlob      = "glob"
 )
 
 // FileModificationTools lists tools that create or modify files

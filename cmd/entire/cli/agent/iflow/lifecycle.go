@@ -15,6 +15,7 @@ import (
 var (
 	_ agent.TranscriptAnalyzer = (*IFlowCLIAgent)(nil)
 	_ agent.HookResponseWriter = (*IFlowCLIAgent)(nil)
+	_ agent.TokenCalculator    = (*IFlowCLIAgent)(nil)
 )
 
 // WriteHookResponse outputs a JSON hook response to stdout.

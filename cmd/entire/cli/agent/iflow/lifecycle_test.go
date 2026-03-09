@@ -290,3 +290,166 @@ func TestEventTimestamp(t *testing.T) {
 		t.Error("Event timestamp is not within expected range")
 	}
 }
+
+func TestParsePreToolUse(t *testing.T) {
+	ag := NewIFlowCLIAgent().(*IFlowCLIAgent)
+
+	tests := []struct {
+		name  string
+		input map[string]interface{}
+	}{
+		{
+			name: "pre-tool-use with file_path",
+			input: map[string]interface{}{
+				"session_id":      "test-session",
+				"cwd":             "/home/user/project",
+				"hook_event_name": "PreToolUse",
+				"transcript_path": "/home/user/.iflow/projects/test-session.jsonl",
+				"tool_name":       "write_file",
+				"tool_aliases":    []string{"write", "create"},
+				"tool_input": map[string]interface{}{
+					"file_path": "/home/user/project/test.go",
+					"content":   "package main",
+				},
+			},
+		},
+		{
+			name: "pre-tool-use with edit tool",
+			input: map[string]interface{}{
+				"session_id":      "test-session",
+				"cwd":             "/home/user/project",
+				"hook_event_name": "PreToolUse",
+				"tool_name":       "replace",
+				"tool_aliases":    []string{"Edit", "edit"},
+				"tool_input": map[string]interface{}{
+					"file_path":  "/home/user/project/main.go",
+					"old_string": "old",
+					"new_string": "new",
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, _ := json.Marshal(tt.input)
+			stdin := strings.NewReader(string(data))
+
+			// PreToolUse currently returns nil (no lifecycle event)
+			event, err := ag.ParseHookEvent(context.Background(), HookNamePreToolUse, stdin)
+			if err != nil {
+				t.Errorf("ParseHookEvent failed: %v", err)
+			}
+			// PreToolUse doesn't generate a lifecycle event in current implementation
+			if event != nil {
+				t.Errorf("Expected nil event for PreToolUse, got %v", event)
+			}
+		})
+	}
+}
+
+func TestParsePostToolUse(t *testing.T) {
+	ag := NewIFlowCLIAgent().(*IFlowCLIAgent)
+
+	tests := []struct {
+		name  string
+		input map[string]interface{}
+	}{
+		{
+			name: "post-tool-use with response",
+			input: map[string]interface{}{
+				"session_id":      "test-session",
+				"cwd":             "/home/user/project",
+				"hook_event_name": "PostToolUse",
+				"transcript_path": "/home/user/.iflow/projects/test-session.jsonl",
+				"tool_name":       "write_file",
+				"tool_aliases":    []string{"write", "create"},
+				"tool_input": map[string]interface{}{
+					"file_path": "/home/user/project/test.go",
+					"content":   "package main",
+				},
+				"tool_response": map[string]interface{}{
+					"result": map[string]interface{}{
+						"llmContent": "File written successfully",
+					},
+				},
+			},
+		},
+		{
+			name: "post-tool-use without response",
+			input: map[string]interface{}{
+				"session_id":      "test-session",
+				"cwd":             "/home/user/project",
+				"hook_event_name": "PostToolUse",
+				"tool_name":       "read_file",
+				"tool_input": map[string]interface{}{
+					"file_path": "/home/user/project/main.go",
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, _ := json.Marshal(tt.input)
+			stdin := strings.NewReader(string(data))
+
+			// PostToolUse currently returns nil (no lifecycle event)
+			event, err := ag.ParseHookEvent(context.Background(), HookNamePostToolUse, stdin)
+			if err != nil {
+				t.Errorf("ParseHookEvent failed: %v", err)
+			}
+			// PostToolUse doesn't generate a lifecycle event in current implementation
+			if event != nil {
+				t.Errorf("Expected nil event for PostToolUse, got %v", event)
+			}
+		})
+	}
+}
+
+func TestParseSetUpEnvironment(t *testing.T) {
+	ag := NewIFlowCLIAgent().(*IFlowCLIAgent)
+
+	input := map[string]interface{}{
+		"session_id":      "test-session",
+		"cwd":             "/home/user/project",
+		"hook_event_name": "SetUpEnvironment",
+		"transcript_path": "/home/user/.iflow/projects/test-session.jsonl",
+	}
+
+	data, _ := json.Marshal(input)
+	stdin := strings.NewReader(string(data))
+
+	// SetUpEnvironment returns nil (no lifecycle event)
+	event, err := ag.ParseHookEvent(context.Background(), HookNameSetUpEnvironment, stdin)
+	if err != nil {
+		t.Errorf("ParseHookEvent failed: %v", err)
+	}
+	if event != nil {
+		t.Errorf("Expected nil event for SetUpEnvironment, got %v", event)
+	}
+}
+
+func TestParseNotification(t *testing.T) {
+	ag := NewIFlowCLIAgent().(*IFlowCLIAgent)
+
+	input := map[string]interface{}{
+		"session_id":      "test-session",
+		"cwd":             "/home/user/project",
+		"hook_event_name": "Notification",
+		"transcript_path": "/home/user/.iflow/projects/test-session.jsonl",
+		"message":         "Permission request for file access",
+	}
+
+	data, _ := json.Marshal(input)
+	stdin := strings.NewReader(string(data))
+
+	// Notification returns nil (no lifecycle event)
+	event, err := ag.ParseHookEvent(context.Background(), HookNameNotification, stdin)
+	if err != nil {
+		t.Errorf("ParseHookEvent failed: %v", err)
+	}
+	if event != nil {
+		t.Errorf("Expected nil event for Notification, got %v", event)
+	}
+}

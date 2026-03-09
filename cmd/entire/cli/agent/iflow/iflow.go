@@ -271,3 +271,37 @@ var nonAlphanumericRegex = regexp.MustCompile(`[^a-zA-Z0-9]`)
 func SanitizePathForIFlow(path string) string {
 	return nonAlphanumericRegex.ReplaceAllString(path, "-")
 }
+
+// CalculateTokenUsage computes token usage from the transcript starting at the given line offset.
+// iFlow transcripts are JSONL format where each line may contain token usage data.
+// If token data is not available in the transcript, returns empty TokenUsage.
+func (i *IFlowCLIAgent) CalculateTokenUsage(transcriptData []byte, fromOffset int) (*agent.TokenUsage, error) {
+	lines, err := ParseTranscriptFromBytes(transcriptData)
+	if err != nil {
+		return &agent.TokenUsage{}, fmt.Errorf("failed to parse transcript for token usage: %w", err)
+	}
+
+	usage := &agent.TokenUsage{}
+
+	// Skip lines before fromOffset
+	for idx := fromOffset; idx < len(lines); idx++ {
+		line := lines[idx]
+
+		// Only count tokens from assistant messages (type "assistant" or "gemini")
+		// iFlow may use different message types
+		if line.Type != "assistant" && line.Type != "gemini" && line.Type != "ai" {
+			continue
+		}
+
+		if line.Tokens == nil {
+			continue
+		}
+
+		usage.APICallCount++
+		usage.InputTokens += line.Tokens.Input
+		usage.OutputTokens += line.Tokens.Output
+		usage.CacheReadTokens += line.Tokens.Cached
+	}
+
+	return usage, nil
+}

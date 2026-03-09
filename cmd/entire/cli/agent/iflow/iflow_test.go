@@ -139,7 +139,7 @@ func TestIFlowCLIAgent_ResolveSessionFile(t *testing.T) {
 	ag := NewIFlowCLIAgent()
 	sessionDir := "/home/user/.iflow/projects/my-project"
 	sessionID := "test-session"
-	
+
 	path := ag.ResolveSessionFile(sessionDir, sessionID)
 	expected := filepath.Join(sessionDir, "test-session.jsonl")
 	if path != expected {
@@ -152,7 +152,7 @@ func TestIFlowCLIAgent_GetSessionID(t *testing.T) {
 	input := &agent.HookInput{
 		SessionID: "test-session-id",
 	}
-	
+
 	sessionID := ag.GetSessionID(input)
 	if sessionID != "test-session-id" {
 		t.Errorf("Expected session ID %q, got %q", "test-session-id", sessionID)
@@ -198,5 +198,115 @@ func TestGetByAgentType_IFlow(t *testing.T) {
 	}
 	if ag.Type() != agent.AgentTypeIFlow {
 		t.Errorf("Expected type %q, got %q", agent.AgentTypeIFlow, ag.Type())
+	}
+}
+
+func TestIFlowCLIAgent_ImplementsTokenCalculator(t *testing.T) {
+	var _ agent.TokenCalculator = (*IFlowCLIAgent)(nil)
+}
+
+func TestCalculateTokenUsage(t *testing.T) {
+	ag := NewIFlowCLIAgent().(*IFlowCLIAgent)
+
+	tests := []struct {
+		name        string
+		transcript  string
+		fromOffset  int
+		expectUsage *agent.TokenUsage
+		expectErr   bool
+	}{
+		{
+			name:        "empty transcript",
+			transcript:  "",
+			fromOffset:  0,
+			expectUsage: &agent.TokenUsage{},
+			expectErr:   false,
+		},
+		{
+			name: "transcript with tokens",
+			transcript: `{"type":"user","timestamp":"2024-01-01T00:00:00Z","message":"hello"}
+{"type":"assistant","timestamp":"2024-01-01T00:00:01Z","tokens":{"input":100,"output":50,"cached":10}}
+{"type":"assistant","timestamp":"2024-01-01T00:00:02Z","tokens":{"input":200,"output":75,"cached":20}}`,
+			fromOffset: 0,
+			expectUsage: &agent.TokenUsage{
+				InputTokens:     300,
+				OutputTokens:    125,
+				CacheReadTokens: 30,
+				APICallCount:    2,
+			},
+			expectErr: false,
+		},
+		{
+			name: "transcript with fromOffset",
+			transcript: `{"type":"assistant","timestamp":"2024-01-01T00:00:01Z","tokens":{"input":100,"output":50}}
+{"type":"assistant","timestamp":"2024-01-01T00:00:02Z","tokens":{"input":200,"output":75}}`,
+			fromOffset: 1,
+			expectUsage: &agent.TokenUsage{
+				InputTokens:  200,
+				OutputTokens: 75,
+				APICallCount: 1,
+			},
+			expectErr: false,
+		},
+		{
+			name: "transcript without tokens",
+			transcript: `{"type":"user","timestamp":"2024-01-01T00:00:00Z","message":"hello"}
+{"type":"assistant","timestamp":"2024-01-01T00:00:01Z","message":"hi there"}`,
+			fromOffset:  0,
+			expectUsage: &agent.TokenUsage{},
+			expectErr:   false,
+		},
+		{
+			name: "mixed message types",
+			transcript: `{"type":"user","timestamp":"2024-01-01T00:00:00Z","message":"hello","tokens":{"input":50}}
+{"type":"assistant","timestamp":"2024-01-01T00:00:01Z","tokens":{"input":100,"output":50}}
+{"type":"ai","timestamp":"2024-01-01T00:00:02Z","tokens":{"input":200,"output":75}}`,
+			fromOffset: 0,
+			expectUsage: &agent.TokenUsage{
+				InputTokens:  300,
+				OutputTokens: 125,
+				APICallCount: 2,
+			},
+			expectErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			usage, err := ag.CalculateTokenUsage([]byte(tt.transcript), tt.fromOffset)
+			if (err != nil) != tt.expectErr {
+				t.Errorf("CalculateTokenUsage() error = %v, expectErr %v", err, tt.expectErr)
+				return
+			}
+			if usage.InputTokens != tt.expectUsage.InputTokens {
+				t.Errorf("InputTokens = %d, want %d", usage.InputTokens, tt.expectUsage.InputTokens)
+			}
+			if usage.OutputTokens != tt.expectUsage.OutputTokens {
+				t.Errorf("OutputTokens = %d, want %d", usage.OutputTokens, tt.expectUsage.OutputTokens)
+			}
+			if usage.CacheReadTokens != tt.expectUsage.CacheReadTokens {
+				t.Errorf("CacheReadTokens = %d, want %d", usage.CacheReadTokens, tt.expectUsage.CacheReadTokens)
+			}
+			if usage.APICallCount != tt.expectUsage.APICallCount {
+				t.Errorf("APICallCount = %d, want %d", usage.APICallCount, tt.expectUsage.APICallCount)
+			}
+		})
+	}
+}
+
+func TestCalculateTokenUsage_InvalidJSON(t *testing.T) {
+	ag := NewIFlowCLIAgent().(*IFlowCLIAgent)
+
+	// Invalid JSON should not cause panic, but return empty usage
+	transcript := `{invalid json`
+	usage, err := ag.CalculateTokenUsage([]byte(transcript), 0)
+
+	// The current implementation should handle this gracefully
+	// ParseTranscriptFromBytes skips malformed lines
+	if err != nil {
+		t.Errorf("Expected no error for malformed JSON, got %v", err)
+	}
+	if usage == nil {
+		t.Error("Expected non-nil usage")
 	}
 }
