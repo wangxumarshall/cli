@@ -174,9 +174,24 @@ func runEnableInteractive(ctx context.Context, w io.Writer, agents []agent.Agent
 		return fmt.Errorf("failed to clean up deselected agents: %w", err)
 	}
 
-	// Setup agent hooks for all selected agents
+	// Load existing settings EARLY to get LocalDev for agent hook installation.
+	// This ensures re-running `entire enable` without --local-dev preserves existing localDev setting.
+	settings, err := LoadEntireSettings(ctx)
+	if err != nil {
+		// If we can't load, start with defaults
+		settings = &EntireSettings{}
+	}
+	// Merge opts flags into settings (opts takes precedence)
+	if opts.LocalDev {
+		settings.LocalDev = true
+	}
+	if opts.AbsoluteGitHookPath {
+		settings.AbsoluteGitHookPath = true
+	}
+
+	// Setup agent hooks for all selected agents using merged settings.LocalDev
 	for _, ag := range agents {
-		if _, err := setupAgentHooks(ctx, ag, opts.LocalDev, opts.ForceHooks); err != nil {
+		if _, err := setupAgentHooks(ctx, ag, settings.LocalDev, opts.ForceHooks); err != nil {
 			return fmt.Errorf("failed to setup %s hooks: %w", ag.Type(), err)
 		}
 	}
@@ -186,20 +201,8 @@ func runEnableInteractive(ctx context.Context, w io.Writer, agents []agent.Agent
 		return fmt.Errorf("failed to setup .entire directory: %w", err)
 	}
 
-	// Load existing settings to preserve other options (like strategy_options.push)
-	settings, err := LoadEntireSettings(ctx)
-	if err != nil {
-		// If we can't load, start with defaults
-		settings = &EntireSettings{}
-	}
 	// Update the specific fields
 	settings.Enabled = true
-	if opts.LocalDev {
-		settings.LocalDev = true
-	}
-	if opts.AbsoluteGitHookPath {
-		settings.AbsoluteGitHookPath = true
-	}
 
 	// Set push_sessions option if --skip-push-sessions flag was provided
 	if opts.SkipPushSessions {
@@ -596,8 +599,23 @@ func setupAgentHooksNonInteractive(ctx context.Context, w io.Writer, ag agent.Ag
 
 	fmt.Fprintf(w, "Agent: %s\n\n", ag.Type())
 
-	// Install agent hooks (agent hooks don't depend on settings)
-	installedHooks, err := hookAgent.InstallHooks(ctx, opts.LocalDev, opts.ForceHooks)
+	// Load existing settings EARLY to get LocalDev for agent hook installation.
+	// This ensures re-running `entire enable --agent X` without --local-dev preserves existing localDev setting.
+	settings, err := LoadEntireSettings(ctx)
+	if err != nil {
+		// If we can't load, start with defaults
+		settings = &EntireSettings{}
+	}
+	// Merge opts flags into settings (opts takes precedence)
+	if opts.LocalDev {
+		settings.LocalDev = true
+	}
+	if opts.AbsoluteGitHookPath {
+		settings.AbsoluteGitHookPath = true
+	}
+
+	// Install agent hooks using merged settings.LocalDev
+	installedHooks, err := hookAgent.InstallHooks(ctx, settings.LocalDev, opts.ForceHooks)
 	if err != nil {
 		return fmt.Errorf("failed to install hooks for %s: %w", agentName, err)
 	}
@@ -607,19 +625,8 @@ func setupAgentHooksNonInteractive(ctx context.Context, w io.Writer, ag agent.Ag
 		return fmt.Errorf("failed to setup .entire directory: %w", err)
 	}
 
-	// Load existing settings to preserve other options (like strategy_options.push)
-	settings, err := LoadEntireSettings(ctx)
-	if err != nil {
-		// If we can't load, start with defaults
-		settings = &EntireSettings{}
-	}
+	// Update the specific fields
 	settings.Enabled = true
-	if opts.LocalDev {
-		settings.LocalDev = true
-	}
-	if opts.AbsoluteGitHookPath {
-		settings.AbsoluteGitHookPath = true
-	}
 
 	// Set push_sessions option if --skip-push-sessions flag was provided
 	if opts.SkipPushSessions {
