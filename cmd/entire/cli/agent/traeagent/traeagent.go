@@ -292,51 +292,51 @@ func ExtractModifiedFiles(data []byte) ([]string, error) {
 // Raw data structures for parsing hooks
 
 type sessionStartRaw struct {
-	SessionID     string `json:"session_id"`
+	SessionID      string `json:"session_id"`
 	TrajectoryPath string `json:"trajectory_path"`
 }
 
 type sessionEndRaw struct {
-	SessionID     string `json:"session_id"`
+	SessionID      string `json:"session_id"`
 	TrajectoryPath string `json:"trajectory_path"`
 }
 
 type preToolUseRaw struct {
-	SessionID     string          `json:"session_id"`
+	SessionID      string          `json:"session_id"`
 	TrajectoryPath string          `json:"trajectory_path"`
-	ToolName      string          `json:"tool_name"`
-	ToolUseID     string          `json:"tool_use_id"`
-	ToolInput     json.RawMessage `json:"tool_input"`
+	ToolName       string          `json:"tool_name"`
+	ToolUseID      string          `json:"tool_use_id"`
+	ToolInput      json.RawMessage `json:"tool_input"`
 }
 
 type postToolUseRaw struct {
-	SessionID     string          `json:"session_id"`
+	SessionID      string          `json:"session_id"`
 	TrajectoryPath string          `json:"trajectory_path"`
-	ToolName      string          `json:"tool_name"`
-	ToolUseID     string          `json:"tool_use_id"`
-	ToolInput     json.RawMessage `json:"tool_input"`
-	ToolResponse  json.RawMessage `json:"tool_response"`
+	ToolName       string          `json:"tool_name"`
+	ToolUseID      string          `json:"tool_use_id"`
+	ToolInput      json.RawMessage `json:"tool_input"`
+	ToolResponse   json.RawMessage `json:"tool_response"`
 }
 
 type preModelRaw struct {
-	SessionID     string `json:"session_id"`
+	SessionID      string `json:"session_id"`
 	TrajectoryPath string `json:"trajectory_path"`
-	ModelName     string `json:"model_name"`
-	Prompt        string `json:"prompt"`
+	ModelName      string `json:"model_name"`
+	Prompt         string `json:"prompt"`
 }
 
 type postModelRaw struct {
-	SessionID     string          `json:"session_id"`
+	SessionID      string          `json:"session_id"`
 	TrajectoryPath string          `json:"trajectory_path"`
-	ModelName     string          `json:"model_name"`
-	Response      string          `json:"response"`
-	TokenUsage    json.RawMessage `json:"token_usage"`
+	ModelName      string          `json:"model_name"`
+	Response       string          `json:"response"`
+	TokenUsage     json.RawMessage `json:"token_usage"`
 }
 
 type preCompressRaw struct {
-	SessionID     string `json:"session_id"`
+	SessionID      string `json:"session_id"`
 	TrajectoryPath string `json:"trajectory_path"`
-	Context       string `json:"context"`
+	Context        string `json:"context"`
 }
 
 type notificationRaw struct {

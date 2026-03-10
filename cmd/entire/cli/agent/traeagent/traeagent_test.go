@@ -9,6 +9,7 @@ import (
 )
 
 func TestNewTraeAgent(t *testing.T) {
+	t.Parallel()
 	ag := NewTraeAgent()
 	assert.NotNil(t, ag)
 	assert.Equal(t, agent.AgentNameTraeAgent, ag.Name())
@@ -16,22 +17,26 @@ func TestNewTraeAgent(t *testing.T) {
 	assert.Equal(t, "Trae Agent - ByteDance's LLM-based software engineering agent", ag.Description())
 }
 
-func TestTraeAgent_SupportsHooks(t *testing.T) {
+func TestTraeAgent_HookSupport(t *testing.T) {
+	t.Parallel()
 	ag := NewTraeAgent()
-	assert.True(t, ag.SupportsHooks())
+	_, ok := ag.(agent.HookSupport)
+	assert.True(t, ok, "TraeAgent should implement HookSupport")
 }
 
 func TestTraeAgent_ProtectedDirs(t *testing.T) {
+	t.Parallel()
 	ag := NewTraeAgent()
 	dirs := ag.ProtectedDirs()
 	assert.Equal(t, []string{".trae"}, dirs)
 }
 
-func TestTraeAgent_GetHookNames(t *testing.T) {
+func TestTraeAgent_HookNames(t *testing.T) {
+	t.Parallel()
 	ag := NewTraeAgent()
-	hookHandler, ok := ag.(agent.HookHandler)
-	assert.True(t, ok, "TraeAgent should implement HookHandler")
-	hookNames := hookHandler.GetHookNames()
+	hookSupport, ok := ag.(agent.HookSupport)
+	assert.True(t, ok, "TraeAgent should implement HookSupport")
+	hookNames := hookSupport.HookNames()
 	assert.Contains(t, hookNames, HookNameSessionStart)
 	assert.Contains(t, hookNames, HookNameSessionEnd)
 	assert.Contains(t, hookNames, HookNameBeforeAgent)
@@ -43,22 +48,4 @@ func TestTraeAgent_GetHookNames(t *testing.T) {
 	assert.Contains(t, hookNames, HookNameAfterTool)
 	assert.Contains(t, hookNames, HookNamePreCompress)
 	assert.Contains(t, hookNames, HookNameNotification)
-}
-
-func TestTraeAgent_GetSupportedHooks(t *testing.T) {
-	ag := NewTraeAgent()
-	hookSupport, ok := ag.(agent.HookSupport)
-	assert.True(t, ok, "TraeAgent should implement HookSupport")
-	supportedHooks := hookSupport.GetSupportedHooks()
-	assert.Contains(t, supportedHooks, agent.HookSessionStart)
-	assert.Contains(t, supportedHooks, agent.HookSessionEnd)
-	assert.Contains(t, supportedHooks, agent.HookBeforeAgent)
-	assert.Contains(t, supportedHooks, agent.HookAfterAgent)
-	assert.Contains(t, supportedHooks, agent.HookBeforeModel)
-	assert.Contains(t, supportedHooks, agent.HookAfterModel)
-	assert.Contains(t, supportedHooks, agent.HookBeforeToolSelection)
-	assert.Contains(t, supportedHooks, agent.HookPreTool)
-	assert.Contains(t, supportedHooks, agent.HookAfterTool)
-	assert.Contains(t, supportedHooks, agent.HookPreCompress)
-	assert.Contains(t, supportedHooks, agent.HookNotification)
 }
