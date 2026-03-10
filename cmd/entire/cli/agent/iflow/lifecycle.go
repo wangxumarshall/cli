@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
+	"github.com/entireio/cli/cmd/entire/cli/paths"
 )
 
 // Ensure IFlowCLIAgent implements required interfaces
@@ -32,22 +33,22 @@ func (i *IFlowCLIAgent) WriteHookResponse(message string) error {
 
 // ParseHookEvent translates an iFlow CLI hook into a normalized lifecycle Event.
 // Returns nil if the hook has no lifecycle significance.
-func (i *IFlowCLIAgent) ParseHookEvent(_ context.Context, hookName string, stdin io.Reader) (*agent.Event, error) {
+func (i *IFlowCLIAgent) ParseHookEvent(ctx context.Context, hookName string, stdin io.Reader) (*agent.Event, error) {
 	switch hookName {
 	case HookNameSessionStart:
-		return i.parseSessionStart(stdin)
+		return i.parseSessionStart(ctx, stdin)
 	case HookNameUserPromptSubmit:
-		return i.parseTurnStart(stdin)
+		return i.parseTurnStart(ctx, stdin)
 	case HookNamePreToolUse:
 		return i.parsePreToolUse(stdin)
 	case HookNamePostToolUse:
 		return i.parsePostToolUse(stdin)
 	case HookNameStop:
-		return i.parseStop(stdin)
+		return i.parseStop(ctx, stdin)
 	case HookNameSessionEnd:
-		return i.parseSessionEnd(stdin)
+		return i.parseSessionEnd(ctx, stdin)
 	case HookNameSubagentStop:
-		return i.parseSubagentStop(stdin)
+		return i.parseSubagentStop(ctx, stdin)
 	case HookNameSetUpEnvironment, HookNameNotification:
 		// These hooks don't have lifecycle significance for Entire
 		return nil, nil
@@ -58,16 +59,56 @@ func (i *IFlowCLIAgent) ParseHookEvent(_ context.Context, hookName string, stdin
 
 // --- Internal hook parsing functions ---
 
-func (i *IFlowCLIAgent) parseSessionStart(stdin io.Reader) (*agent.Event, error) {
+// computeTranscriptPath returns the transcript path if provided, or computes it from session_id.
+// iFlow CLI may not always provide transcript_path in hook input, so we compute it as a fallback.
+func (i *IFlowCLIAgent) computeTranscriptPath(ctx context.Context, sessionID, providedPath string) string {
+	// If transcript_path is provided, use it directly
+	if providedPath != "" {
+		return providedPath
+	}
+
+	// Fallback: compute from session_id
+	// Path pattern: ~/.iflow/projects/<sanitized-repo-path>/<session-id>.jsonl
+	if sessionID == "" {
+		return ""
+	}
+
+	repoPath, err := paths.WorktreeRoot(ctx)
+	if err != nil {
+		return ""
+	}
+
+	sessionDir, err := i.GetSessionDir(repoPath)
+	if err != nil {
+		return ""
+	}
+
+	return i.ResolveSessionFile(sessionDir, sessionID)
+}
+
+func (i *IFlowCLIAgent) parseSessionStart(ctx context.Context, stdin io.Reader) (*agent.Event, error) {
 	var input SessionStartInput
 	if err := json.NewDecoder(stdin).Decode(&input); err != nil {
 		return nil, fmt.Errorf("failed to decode session start input: %w", err)
 	}
 
+	// Override with environment variables if present (iFlow CLI may use env vars)
+	sessionID := input.SessionID
+	if envSessionID := os.Getenv(EnvIFlowSessionID); envSessionID != "" {
+		sessionID = envSessionID
+	}
+	transcriptPath := input.TranscriptPath
+	if envTranscriptPath := os.Getenv(EnvIFlowTranscriptPath); envTranscriptPath != "" {
+		transcriptPath = envTranscriptPath
+	}
+
+	// Fallback: compute transcript path from session_id if not provided
+	transcriptPath = i.computeTranscriptPath(ctx, sessionID, transcriptPath)
+
 	event := &agent.Event{
 		Type:       agent.SessionStart,
-		SessionID:  input.SessionID,
-		SessionRef: input.TranscriptPath,
+		SessionID:  sessionID,
+		SessionRef: transcriptPath,
 		Timestamp:  time.Now(),
 		Metadata:   make(map[string]string),
 	}
@@ -83,17 +124,34 @@ func (i *IFlowCLIAgent) parseSessionStart(stdin io.Reader) (*agent.Event, error)
 	return event, nil
 }
 
-func (i *IFlowCLIAgent) parseTurnStart(stdin io.Reader) (*agent.Event, error) {
+func (i *IFlowCLIAgent) parseTurnStart(ctx context.Context, stdin io.Reader) (*agent.Event, error) {
 	var input UserPromptSubmitInput
 	if err := json.NewDecoder(stdin).Decode(&input); err != nil {
 		return nil, fmt.Errorf("failed to decode user prompt submit input: %w", err)
 	}
 
+	// Override with environment variables if present (iFlow CLI may use env vars)
+	sessionID := input.SessionID
+	if envSessionID := os.Getenv(EnvIFlowSessionID); envSessionID != "" {
+		sessionID = envSessionID
+	}
+	transcriptPath := input.TranscriptPath
+	if envTranscriptPath := os.Getenv(EnvIFlowTranscriptPath); envTranscriptPath != "" {
+		transcriptPath = envTranscriptPath
+	}
+	prompt := input.Prompt
+	if envPrompt := os.Getenv(EnvIFlowUserPrompt); envPrompt != "" {
+		prompt = envPrompt
+	}
+
+	// Fallback: compute transcript path from session_id if not provided
+	transcriptPath = i.computeTranscriptPath(ctx, sessionID, transcriptPath)
+
 	return &agent.Event{
 		Type:       agent.TurnStart,
-		SessionID:  input.SessionID,
-		SessionRef: input.TranscriptPath,
-		Prompt:     input.Prompt,
+		SessionID:  sessionID,
+		SessionRef: transcriptPath,
+		Prompt:     prompt,
 		Timestamp:  time.Now(),
 	}, nil
 }
@@ -124,16 +182,29 @@ func (i *IFlowCLIAgent) parsePostToolUse(stdin io.Reader) (*agent.Event, error) 
 	return nil, nil
 }
 
-func (i *IFlowCLIAgent) parseStop(stdin io.Reader) (*agent.Event, error) {
+func (i *IFlowCLIAgent) parseStop(ctx context.Context, stdin io.Reader) (*agent.Event, error) {
 	var input StopInput
 	if err := json.NewDecoder(stdin).Decode(&input); err != nil {
 		return nil, fmt.Errorf("failed to decode stop input: %w", err)
 	}
 
+	// Override with environment variables if present (iFlow CLI may use env vars)
+	sessionID := input.SessionID
+	if envSessionID := os.Getenv(EnvIFlowSessionID); envSessionID != "" {
+		sessionID = envSessionID
+	}
+	transcriptPath := input.TranscriptPath
+	if envTranscriptPath := os.Getenv(EnvIFlowTranscriptPath); envTranscriptPath != "" {
+		transcriptPath = envTranscriptPath
+	}
+
+	// Fallback: compute transcript path from session_id if not provided
+	transcriptPath = i.computeTranscriptPath(ctx, sessionID, transcriptPath)
+
 	event := &agent.Event{
 		Type:       agent.TurnEnd,
-		SessionID:  input.SessionID,
-		SessionRef: input.TranscriptPath,
+		SessionID:  sessionID,
+		SessionRef: transcriptPath,
 		Timestamp:  time.Now(),
 	}
 
@@ -147,30 +218,56 @@ func (i *IFlowCLIAgent) parseStop(stdin io.Reader) (*agent.Event, error) {
 	return event, nil
 }
 
-func (i *IFlowCLIAgent) parseSessionEnd(stdin io.Reader) (*agent.Event, error) {
+func (i *IFlowCLIAgent) parseSessionEnd(ctx context.Context, stdin io.Reader) (*agent.Event, error) {
 	var input BaseHookInput
 	if err := json.NewDecoder(stdin).Decode(&input); err != nil {
 		return nil, fmt.Errorf("failed to decode session end input: %w", err)
 	}
 
+	// Override with environment variables if present (iFlow CLI may use env vars)
+	sessionID := input.SessionID
+	if envSessionID := os.Getenv(EnvIFlowSessionID); envSessionID != "" {
+		sessionID = envSessionID
+	}
+	transcriptPath := input.TranscriptPath
+	if envTranscriptPath := os.Getenv(EnvIFlowTranscriptPath); envTranscriptPath != "" {
+		transcriptPath = envTranscriptPath
+	}
+
+	// Fallback: compute transcript path from session_id if not provided
+	transcriptPath = i.computeTranscriptPath(ctx, sessionID, transcriptPath)
+
 	return &agent.Event{
 		Type:       agent.SessionEnd,
-		SessionID:  input.SessionID,
-		SessionRef: input.TranscriptPath,
+		SessionID:  sessionID,
+		SessionRef: transcriptPath,
 		Timestamp:  time.Now(),
 	}, nil
 }
 
-func (i *IFlowCLIAgent) parseSubagentStop(stdin io.Reader) (*agent.Event, error) {
+func (i *IFlowCLIAgent) parseSubagentStop(ctx context.Context, stdin io.Reader) (*agent.Event, error) {
 	var input SubagentStopInput
 	if err := json.NewDecoder(stdin).Decode(&input); err != nil {
 		return nil, fmt.Errorf("failed to decode subagent stop input: %w", err)
 	}
 
+	// Override with environment variables if present (iFlow CLI may use env vars)
+	sessionID := input.SessionID
+	if envSessionID := os.Getenv(EnvIFlowSessionID); envSessionID != "" {
+		sessionID = envSessionID
+	}
+	transcriptPath := input.TranscriptPath
+	if envTranscriptPath := os.Getenv(EnvIFlowTranscriptPath); envTranscriptPath != "" {
+		transcriptPath = envTranscriptPath
+	}
+
+	// Fallback: compute transcript path from session_id if not provided
+	transcriptPath = i.computeTranscriptPath(ctx, sessionID, transcriptPath)
+
 	event := &agent.Event{
 		Type:       agent.SubagentEnd,
-		SessionID:  input.SessionID,
-		SessionRef: input.TranscriptPath,
+		SessionID:  sessionID,
+		SessionRef: transcriptPath,
 		Timestamp:  time.Now(),
 	}
 
