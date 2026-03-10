@@ -495,9 +495,8 @@ func runEnableInteractive(ctx context.Context, w io.Writer, agents []agent.Agent
 	// Note about empty repos at the end, after setup is complete
 	if repo, err := strategy.OpenRepository(ctx); err == nil && strategy.IsEmptyRepository(repo) {
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, "Note: This repository has no commits yet. To get started, commit the")
-		fmt.Fprintln(w, "configuration files (e.g. .entire/, .claude/) — session checkpoints")
-		fmt.Fprintln(w, "require at least one commit.")
+		fmt.Fprintln(w, "Note: Session checkpoints require at least one commit. To get started,")
+		fmt.Fprintln(w, "commit the configuration files (e.g. .entire/, .claude/).")
 	}
 
 	return nil
@@ -702,11 +701,6 @@ func detectOrSelectAgent(ctx context.Context, w io.Writer, selectFn func(availab
 		return []agent.Agent{defaultAgent}, nil
 	}
 
-	if !hasInstalledHooks && len(detected) == 0 {
-		fmt.Fprintln(w, "Select the agents you want to use:")
-		fmt.Fprintln(w)
-	}
-
 	// Build pre-selection set.
 	// On re-run: only pre-select agents with hooks installed (respect prior deselection).
 	// On first run: pre-select all detected agents.
@@ -768,7 +762,7 @@ func detectOrSelectAgent(ctx context.Context, w io.Writer, selectFn func(availab
 		form := NewAccessibleForm(
 			huh.NewGroup(
 				huh.NewMultiSelect[string]().
-					Title("Which agents are you using?").
+					Title("Select the agents you want to use").
 					Description("Use space to select, enter to confirm.").
 					Options(options...).
 					Validate(func(selected []string) error {
@@ -932,9 +926,8 @@ func setupAgentHooksNonInteractive(ctx context.Context, w io.Writer, ag agent.Ag
 
 	if repo, err := strategy.OpenRepository(ctx); err == nil && strategy.IsEmptyRepository(repo) {
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, "Note: This repository has no commits yet. To get started, commit the")
-		fmt.Fprintln(w, "configuration files (e.g. .entire/, .claude/) — session checkpoints")
-		fmt.Fprintln(w, "require at least one commit.")
+		fmt.Fprintln(w, "Note: Session checkpoints require at least one commit. To get started,")
+		fmt.Fprintln(w, "commit the configuration files (e.g. .entire/, .claude/).")
 	}
 
 	return nil

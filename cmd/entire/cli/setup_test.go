@@ -930,9 +930,6 @@ func TestDetectOrSelectAgent_NoDetection_WithTTY_ShowsPromptMessages(t *testing.
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, "Select the agents you want to use") {
-		t.Errorf("Expected output to contain 'Select the agents you want to use', got: %s", output)
-	}
 	if !strings.Contains(output, "Selected agents:") {
 		t.Errorf("Expected output to contain 'Selected agents:', got: %s", output)
 	}
