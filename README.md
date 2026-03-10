@@ -260,9 +260,9 @@ entire enable --checkpoint-remote git@github.com:myorg/checkpoints-private.git
 Both SSH and HTTPS URLs are supported. Entire will:
 
 - Create a git remote named `entire-checkpoints` pointing to the configured URL
-- Test reachability before each push (with a 10-second timeout)
-- Fetch and set up the branch locally if it exists on the remote but not locally
-- Fall back to the default push remote if the checkpoint remote is unreachable
+- Fetch and set up the branch locally if it exists on the remote but not locally (one-time)
+- Push checkpoint branches to that remote instead of your default push remote
+- If the remote is unreachable, the push warns and continues without blocking your main push
 
 ### Auto-Summarization
 

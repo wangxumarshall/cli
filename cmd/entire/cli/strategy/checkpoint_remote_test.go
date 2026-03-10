@@ -85,33 +85,7 @@ func TestEnsureGitRemote_NoOpWhenSameURL(t *testing.T) {
 	assert.Contains(t, string(output), url)
 }
 
-func TestIsRemoteReachable_UnreachableURL(t *testing.T) {
-	tmpDir := t.TempDir()
-	testutil.InitRepo(t, tmpDir)
-	t.Chdir(tmpDir)
-
-	ctx := t.Context()
-	// Use an invalid URL that will fail quickly
-	assert.False(t, isRemoteReachable(ctx, "/nonexistent/path/to/repo.git"))
-}
-
-func TestIsRemoteReachable_ReachableLocalRepo(t *testing.T) {
-	ctx := context.Background()
-
-	// Create a bare repo that's reachable
-	remoteDir := t.TempDir()
-	cmd := exec.CommandContext(ctx, "git", "init", "--bare", remoteDir)
-	cmd.Env = testutil.GitIsolatedEnv()
-	require.NoError(t, cmd.Run())
-
-	tmpDir := t.TempDir()
-	testutil.InitRepo(t, tmpDir)
-	t.Chdir(tmpDir)
-
-	assert.True(t, isRemoteReachable(ctx, remoteDir))
-}
-
-func TestEnsureBranchFromRemote_CreatesLocalFromRemote(t *testing.T) {
+func TestFetchBranchIfMissing_CreatesLocalFromRemote(t *testing.T) {
 	ctx := context.Background()
 
 	// Set up a "remote" repo with a branch
@@ -172,13 +146,68 @@ func TestEnsureBranchFromRemote_CreatesLocalFromRemote(t *testing.T) {
 	assert.False(t, testutil.BranchExists(t, localDir, "entire/checkpoints/v1"))
 
 	// Fetch and set up the branch
-	require.NoError(t, ensureBranchFromRemote(ctx, "test-remote", "entire/checkpoints/v1"))
+	require.NoError(t, fetchBranchIfMissing(ctx, "test-remote", "entire/checkpoints/v1"))
 
 	// Verify the branch now exists locally
 	assert.True(t, testutil.BranchExists(t, localDir, "entire/checkpoints/v1"))
 }
 
-func TestEnsureBranchFromRemote_NoOpWhenBranchNotOnRemote(t *testing.T) {
+func TestFetchBranchIfMissing_NoOpWhenBranchExistsLocally(t *testing.T) {
+	ctx := context.Background()
+
+	// Set up local repo with the branch already existing
+	localDir := t.TempDir()
+	testutil.InitRepo(t, localDir)
+	testutil.WriteFile(t, localDir, "f.txt", "init")
+	testutil.GitAdd(t, localDir, "f.txt")
+	testutil.GitCommit(t, localDir, "init")
+
+	// Get the default branch name before switching
+	branchCmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "HEAD")
+	branchCmd.Dir = localDir
+	branchCmd.Env = testutil.GitIsolatedEnv()
+	branchOut, err := branchCmd.Output()
+	require.NoError(t, err)
+	defaultBranch := strings.TrimSpace(string(branchOut))
+
+	// Create the branch locally
+	cmd := exec.CommandContext(ctx, "git", "checkout", "--orphan", "entire/checkpoints/v1")
+	cmd.Dir = localDir
+	cmd.Env = testutil.GitIsolatedEnv()
+	require.NoError(t, cmd.Run())
+
+	cmd = exec.CommandContext(ctx, "git", "rm", "-rf", ".")
+	cmd.Dir = localDir
+	cmd.Env = testutil.GitIsolatedEnv()
+	require.NoError(t, cmd.Run())
+
+	testutil.WriteFile(t, localDir, "data.json", `{"local": true}`)
+	testutil.GitAdd(t, localDir, "data.json")
+
+	cmd = exec.CommandContext(ctx, "git", "-c", "commit.gpgsign=false", "commit", "-m", "local checkpoint")
+	cmd.Dir = localDir
+	cmd.Env = testutil.GitIsolatedEnv()
+	require.NoError(t, cmd.Run())
+
+	// Switch back to the default branch
+	cmd = exec.CommandContext(ctx, "git", "checkout", defaultBranch)
+	cmd.Dir = localDir
+	cmd.Env = testutil.GitIsolatedEnv()
+	require.NoError(t, cmd.Run())
+
+	// Add a remote that points to a nonexistent path - if fetch runs, it would fail
+	cmd = exec.CommandContext(ctx, "git", "remote", "add", "bad-remote", "/nonexistent/repo.git")
+	cmd.Dir = localDir
+	cmd.Env = testutil.GitIsolatedEnv()
+	require.NoError(t, cmd.Run())
+
+	t.Chdir(localDir)
+
+	// Should be a no-op since branch exists locally (no network call)
+	require.NoError(t, fetchBranchIfMissing(ctx, "bad-remote", "entire/checkpoints/v1"))
+}
+
+func TestFetchBranchIfMissing_NoOpWhenBranchNotOnRemote(t *testing.T) {
 	ctx := context.Background()
 
 	// Set up a "remote" repo without the checkpoint branch
@@ -202,7 +231,7 @@ func TestEnsureBranchFromRemote_NoOpWhenBranchNotOnRemote(t *testing.T) {
 
 	t.Chdir(localDir)
 
-	err := ensureBranchFromRemote(ctx, "test-remote", "entire/checkpoints/v1")
+	err := fetchBranchIfMissing(ctx, "test-remote", "entire/checkpoints/v1")
 	require.NoError(t, err)
 
 	// Branch should still not exist locally
@@ -232,7 +261,7 @@ func TestResolveCheckpointRemote_NoConfig(t *testing.T) {
 	assert.Equal(t, "origin", result)
 }
 
-func TestResolveCheckpointRemote_UnreachableRemote(t *testing.T) {
+func TestResolveCheckpointRemote_UnreachableRemote_StillReturnsCheckpointRemote(t *testing.T) {
 	tmpDir := t.TempDir()
 	testutil.InitRepo(t, tmpDir)
 	testutil.WriteFile(t, tmpDir, "f.txt", "init")
@@ -252,8 +281,8 @@ func TestResolveCheckpointRemote_UnreachableRemote(t *testing.T) {
 
 	ctx := t.Context()
 	result := resolveCheckpointRemote(ctx, "origin")
-	// Should fall back to default since remote is unreachable
-	assert.Equal(t, "origin", result)
+	// Should still return the checkpoint remote name - the push itself will handle the failure
+	assert.Equal(t, checkpointRemoteName, result)
 }
 
 func TestResolveCheckpointRemote_ReachableRemote(t *testing.T) {

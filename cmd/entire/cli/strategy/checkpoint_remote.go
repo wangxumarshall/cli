@@ -19,23 +19,22 @@ import (
 // checkpointRemoteName is the git remote name used for the dedicated checkpoint remote.
 const checkpointRemoteName = "entire-checkpoints"
 
-// checkpointRemoteReachabilityTimeout is the timeout for testing remote reachability.
-const checkpointRemoteReachabilityTimeout = 10 * time.Second
-
 // checkpointRemoteFetchTimeout is the timeout for fetching branches from the remote.
 const checkpointRemoteFetchTimeout = 30 * time.Second
 
 // resolveCheckpointRemote determines the remote to use for checkpoint branch operations.
 // If a checkpoint_remote URL is configured in settings:
 //   - Ensures a git remote named "entire-checkpoints" is configured with that URL
-//   - Tests reachability of the remote
-//   - Sets up branch tracking (fetches branches that exist remotely but not locally)
+//   - If a checkpoint branch doesn't exist locally, attempts to fetch it from the remote
 //   - Returns "entire-checkpoints" as the remote name
 //
-// Falls back to the provided defaultRemote if:
+// The push itself handles failures gracefully (doPushBranch warns and continues),
+// so no reachability check is needed here. This avoids adding latency on every push
+// when the remote is temporarily unreachable.
+//
+// Falls back to the provided defaultRemote only if:
 //   - No checkpoint_remote is configured
-//   - The remote is unreachable
-//   - Any error occurs during setup
+//   - The git remote could not be created/updated (local git config error)
 func resolveCheckpointRemote(ctx context.Context, defaultRemote string) string {
 	s, err := settings.Load(ctx)
 	if err != nil {
@@ -47,7 +46,7 @@ func resolveCheckpointRemote(ctx context.Context, defaultRemote string) string {
 		return defaultRemote
 	}
 
-	// Ensure the git remote exists with the correct URL
+	// Ensure the git remote exists with the correct URL (local operation, no network)
 	if err := ensureGitRemote(ctx, checkpointRemoteName, remoteURL); err != nil {
 		logging.Warn(ctx, "checkpoint-remote: failed to configure git remote",
 			slog.String("url", remoteURL),
@@ -56,19 +55,12 @@ func resolveCheckpointRemote(ctx context.Context, defaultRemote string) string {
 		return defaultRemote
 	}
 
-	// Test reachability
-	if !isRemoteReachable(ctx, remoteURL) {
-		logging.Info(ctx, "checkpoint-remote: unreachable, using default remote",
-			slog.String("url", remoteURL),
-			slog.String("default_remote", defaultRemote),
-		)
-		return defaultRemote
-	}
-
-	// Set up branches from the remote
+	// If checkpoint branches don't exist locally, try to fetch them from the remote.
+	// This is a one-time operation per branch - once the branch exists locally,
+	// subsequent pushes skip the fetch entirely.
 	for _, branchName := range []string{paths.MetadataBranchName, paths.TrailsBranchName} {
-		if err := ensureBranchFromRemote(ctx, checkpointRemoteName, branchName); err != nil {
-			logging.Warn(ctx, "checkpoint-remote: failed to set up branch",
+		if err := fetchBranchIfMissing(ctx, checkpointRemoteName, branchName); err != nil {
+			logging.Warn(ctx, "checkpoint-remote: failed to fetch branch",
 				slog.String("branch", branchName),
 				slog.String("error", err.Error()),
 			)
@@ -79,6 +71,7 @@ func resolveCheckpointRemote(ctx context.Context, defaultRemote string) string {
 }
 
 // ensureGitRemote creates or updates a git remote to point to the given URL.
+// This is a local-only operation (no network calls).
 func ensureGitRemote(ctx context.Context, name, url string) error {
 	// Check if remote already exists and get its current URL
 	cmd := exec.CommandContext(ctx, "git", "remote", "get-url", name)
@@ -107,33 +100,23 @@ func ensureGitRemote(ctx context.Context, name, url string) error {
 	return nil
 }
 
-// isRemoteReachable tests if a git remote URL is reachable.
-// Uses git ls-remote with a short timeout to avoid blocking.
-func isRemoteReachable(ctx context.Context, url string) bool {
-	ctx, cancel := context.WithTimeout(ctx, checkpointRemoteReachabilityTimeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "git", "ls-remote", "--heads", url)
-	cmd.Stdin = nil
-	cmd.Stdout = nil // Discard output
-	cmd.Stderr = nil // Discard stderr
-	cmd.Env = append(os.Environ(),
-		"GIT_TERMINAL_PROMPT=0", // Prevent interactive auth prompts
-	)
-
-	return cmd.Run() == nil
-}
-
-// ensureBranchFromRemote ensures a local branch is set up from the checkpoint remote.
-// If the branch doesn't exist locally but exists on the remote, it creates the local branch.
-// If the branch exists locally with a different remote tracking ref, it updates the tracking.
-func ensureBranchFromRemote(ctx context.Context, remote, branchName string) error {
+// fetchBranchIfMissing fetches a branch from the remote only if it doesn't exist locally.
+// This avoids network calls on every push - once the branch exists locally, this is a no-op.
+// If the fetch fails (remote unreachable, branch doesn't exist on remote), the error is
+// returned but the caller should treat it as non-fatal: the push will handle it.
+func fetchBranchIfMissing(ctx context.Context, remote, branchName string) error {
 	repo, err := OpenRepository(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to open repository: %w", err)
 	}
 
-	// Fetch the branch from the remote
+	// Check if branch already exists locally - if so, nothing to do
+	branchRef := plumbing.NewBranchReferenceName(branchName)
+	if _, err := repo.Reference(branchRef, true); err == nil {
+		return nil // Branch exists locally, skip fetch
+	}
+
+	// Branch doesn't exist locally - try to fetch it from the remote
 	fetchCtx, cancel := context.WithTimeout(ctx, checkpointRemoteFetchTimeout)
 	defer cancel()
 
@@ -141,31 +124,27 @@ func ensureBranchFromRemote(ctx context.Context, remote, branchName string) erro
 	fetchCmd := exec.CommandContext(fetchCtx, "git", "fetch", "--no-tags", remote, refSpec)
 	fetchCmd.Stdin = nil
 	fetchCmd.Env = append(os.Environ(),
-		"GIT_TERMINAL_PROMPT=0",
+		"GIT_TERMINAL_PROMPT=0", // Prevent interactive auth prompts
 	)
-	// Fetch may fail if the branch doesn't exist on the remote yet - that's fine
-	fetchErr := fetchCmd.Run()
-
-	branchRef := plumbing.NewBranchReferenceName(branchName)
-	_, localErr := repo.Reference(branchRef, true)
-
-	if localErr != nil && fetchErr == nil {
-		// Branch doesn't exist locally but fetch succeeded (exists on remote)
-		// Create local branch from the remote ref
-		remoteRefName := plumbing.NewRemoteReferenceName(remote, branchName)
-		remoteRef, err := repo.Reference(remoteRefName, true)
-		if err != nil {
-			// Fetch succeeded but remote ref not found - branch may not exist on remote
-			return nil
-		}
-
-		newRef := plumbing.NewHashReference(branchRef, remoteRef.Hash())
-		if err := repo.Storer.SetReference(newRef); err != nil {
-			return fmt.Errorf("failed to create local branch from remote: %w", err)
-		}
-
-		fmt.Fprintf(os.Stderr, "[entire] Fetched %s from %s\n", branchName, remote)
+	if err := fetchCmd.Run(); err != nil {
+		// Fetch failed - remote may be unreachable or branch doesn't exist there yet.
+		// Not fatal: push will create it on the remote when it succeeds.
+		return nil
 	}
 
+	// Fetch succeeded - create local branch from the remote ref
+	remoteRefName := plumbing.NewRemoteReferenceName(remote, branchName)
+	remoteRef, err := repo.Reference(remoteRefName, true)
+	if err != nil {
+		// Fetch succeeded but remote ref not found - branch may not exist on remote
+		return nil
+	}
+
+	newRef := plumbing.NewHashReference(branchRef, remoteRef.Hash())
+	if err := repo.Storer.SetReference(newRef); err != nil {
+		return fmt.Errorf("failed to create local branch from remote: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "[entire] Fetched %s from %s\n", branchName, remote)
 	return nil
 }

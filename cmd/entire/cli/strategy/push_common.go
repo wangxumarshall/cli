@@ -97,15 +97,27 @@ func doPushBranch(ctx context.Context, remote, branchName string) error {
 
 	if err := fetchAndMergeSessionsCommon(ctx, remote, branchName); err != nil {
 		fmt.Fprintf(os.Stderr, "[entire] Warning: couldn't sync %s: %v\n", branchName, err)
+		printCheckpointRemoteHint(remote)
 		return nil // Don't fail the main push
 	}
 
 	// Try pushing again after merge
 	if err := tryPushSessionsCommon(ctx, remote, branchName); err != nil {
 		fmt.Fprintf(os.Stderr, "[entire] Warning: failed to push %s after sync: %v\n", branchName, err)
+		printCheckpointRemoteHint(remote)
 	}
 
 	return nil
+}
+
+// printCheckpointRemoteHint prints a hint when a push to the checkpoint remote fails.
+// Only prints when the remote is the dedicated checkpoint remote (not the default).
+func printCheckpointRemoteHint(remote string) {
+	if remote != checkpointRemoteName {
+		return
+	}
+	fmt.Fprintln(os.Stderr, "[entire] A checkpoint remote is configured in .entire/settings.json but could not be reached.")
+	fmt.Fprintln(os.Stderr, "[entire] Checkpoints are saved locally but not synced. Ensure you have access to the checkpoint remote.")
 }
 
 // tryPushSessionsCommon attempts to push the sessions branch.
