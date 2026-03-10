@@ -94,18 +94,19 @@ func (i *IFlowCLIAgent) InstallHooks(ctx context.Context, localDev bool, force b
 	}
 
 	// Parse hook types we need to modify
+	// All hooks use IFlowHookMatcher format (with hooks array wrapper) per iFlow CLI specification
 	var preToolUse, postToolUse, sessionStart, userPromptSubmit, notification []IFlowHookMatcher
-	var setUpEnvironment, stop, subagentStop, sessionEnd []IFlowHookEntry
+	var setUpEnvironment, stop, subagentStop, sessionEnd []IFlowHookMatcher
 
 	parseHookMatcherType(rawHooks, "PreToolUse", &preToolUse)
 	parseHookMatcherType(rawHooks, "PostToolUse", &postToolUse)
 	parseHookMatcherType(rawHooks, "SessionStart", &sessionStart)
 	parseHookMatcherType(rawHooks, "UserPromptSubmit", &userPromptSubmit)
 	parseHookMatcherType(rawHooks, "Notification", &notification)
-	parseHookEntryType(rawHooks, "SetUpEnvironment", &setUpEnvironment)
-	parseHookEntryType(rawHooks, "Stop", &stop)
-	parseHookEntryType(rawHooks, "SubagentStop", &subagentStop)
-	parseHookEntryType(rawHooks, "SessionEnd", &sessionEnd)
+	parseHookMatcherType(rawHooks, "SetUpEnvironment", &setUpEnvironment)
+	parseHookMatcherType(rawHooks, "Stop", &stop)
+	parseHookMatcherType(rawHooks, "SubagentStop", &subagentStop)
+	parseHookMatcherType(rawHooks, "SessionEnd", &sessionEnd)
 
 	// If force is true, remove all existing Entire hooks first
 	if force {
@@ -114,10 +115,10 @@ func (i *IFlowCLIAgent) InstallHooks(ctx context.Context, localDev bool, force b
 		sessionStart = removeEntireHooks(sessionStart)
 		userPromptSubmit = removeEntireHooks(userPromptSubmit)
 		notification = removeEntireHooks(notification)
-		setUpEnvironment = removeEntireHookEntries(setUpEnvironment)
-		stop = removeEntireHookEntries(stop)
-		subagentStop = removeEntireHookEntries(subagentStop)
-		sessionEnd = removeEntireHookEntries(sessionEnd)
+		setUpEnvironment = removeEntireHooks(setUpEnvironment)
+		stop = removeEntireHooks(stop)
+		subagentStop = removeEntireHooks(subagentStop)
+		sessionEnd = removeEntireHooks(sessionEnd)
 	}
 
 	// Define hook commands
@@ -183,38 +184,34 @@ func (i *IFlowCLIAgent) InstallHooks(ctx context.Context, localDev bool, force b
 		count++
 	}
 
-	// Add SetUpEnvironment hook
-	if !hookEntryExists(setUpEnvCmd, setUpEnvironment) {
-		setUpEnvironment = append(setUpEnvironment, IFlowHookEntry{
-			Type:    "command",
-			Command: setUpEnvCmd,
+	// Add SetUpEnvironment hook (no matcher, just hooks array)
+	if !hookMatcherHasCommand(setUpEnvironment, setUpEnvCmd) {
+		setUpEnvironment = append(setUpEnvironment, IFlowHookMatcher{
+			Hooks: []IFlowHookEntry{{Type: "command", Command: setUpEnvCmd}},
 		})
 		count++
 	}
 
-	// Add Stop hook
-	if !hookEntryExists(stopCmd, stop) {
-		stop = append(stop, IFlowHookEntry{
-			Type:    "command",
-			Command: stopCmd,
+	// Add Stop hook (no matcher, just hooks array)
+	if !hookMatcherHasCommand(stop, stopCmd) {
+		stop = append(stop, IFlowHookMatcher{
+			Hooks: []IFlowHookEntry{{Type: "command", Command: stopCmd}},
 		})
 		count++
 	}
 
-	// Add SubagentStop hook
-	if !hookEntryExists(subagentStopCmd, subagentStop) {
-		subagentStop = append(subagentStop, IFlowHookEntry{
-			Type:    "command",
-			Command: subagentStopCmd,
+	// Add SubagentStop hook (no matcher, just hooks array)
+	if !hookMatcherHasCommand(subagentStop, subagentStopCmd) {
+		subagentStop = append(subagentStop, IFlowHookMatcher{
+			Hooks: []IFlowHookEntry{{Type: "command", Command: subagentStopCmd}},
 		})
 		count++
 	}
 
-	// Add SessionEnd hook
-	if !hookEntryExists(sessionEndCmd, sessionEnd) {
-		sessionEnd = append(sessionEnd, IFlowHookEntry{
-			Type:    "command",
-			Command: sessionEndCmd,
+	// Add SessionEnd hook (no matcher, just hooks array)
+	if !hookMatcherHasCommand(sessionEnd, sessionEndCmd) {
+		sessionEnd = append(sessionEnd, IFlowHookMatcher{
+			Hooks: []IFlowHookEntry{{Type: "command", Command: sessionEndCmd}},
 		})
 		count++
 	}
@@ -247,10 +244,10 @@ func (i *IFlowCLIAgent) InstallHooks(ctx context.Context, localDev bool, force b
 	marshalHookMatcherType(rawHooks, "SessionStart", sessionStart)
 	marshalHookMatcherType(rawHooks, "UserPromptSubmit", userPromptSubmit)
 	marshalHookMatcherType(rawHooks, "Notification", notification)
-	marshalHookEntryType(rawHooks, "SetUpEnvironment", setUpEnvironment)
-	marshalHookEntryType(rawHooks, "Stop", stop)
-	marshalHookEntryType(rawHooks, "SubagentStop", subagentStop)
-	marshalHookEntryType(rawHooks, "SessionEnd", sessionEnd)
+	marshalHookMatcherType(rawHooks, "SetUpEnvironment", setUpEnvironment)
+	marshalHookMatcherType(rawHooks, "Stop", stop)
+	marshalHookMatcherType(rawHooks, "SubagentStop", subagentStop)
+	marshalHookMatcherType(rawHooks, "SessionEnd", sessionEnd)
 
 	// Marshal hooks and update raw settings
 	hooksJSON, err := json.Marshal(rawHooks)
@@ -312,18 +309,19 @@ func (i *IFlowCLIAgent) UninstallHooks(ctx context.Context) error {
 	}
 
 	// Parse and clean all hook types
+	// All hooks use IFlowHookMatcher format (with hooks array wrapper) per iFlow CLI specification
 	var preToolUse, postToolUse, sessionStart, userPromptSubmit, notification []IFlowHookMatcher
-	var setUpEnvironment, stop, subagentStop, sessionEnd []IFlowHookEntry
+	var setUpEnvironment, stop, subagentStop, sessionEnd []IFlowHookMatcher
 
 	parseHookMatcherType(rawHooks, "PreToolUse", &preToolUse)
 	parseHookMatcherType(rawHooks, "PostToolUse", &postToolUse)
 	parseHookMatcherType(rawHooks, "SessionStart", &sessionStart)
 	parseHookMatcherType(rawHooks, "UserPromptSubmit", &userPromptSubmit)
 	parseHookMatcherType(rawHooks, "Notification", &notification)
-	parseHookEntryType(rawHooks, "SetUpEnvironment", &setUpEnvironment)
-	parseHookEntryType(rawHooks, "Stop", &stop)
-	parseHookEntryType(rawHooks, "SubagentStop", &subagentStop)
-	parseHookEntryType(rawHooks, "SessionEnd", &sessionEnd)
+	parseHookMatcherType(rawHooks, "SetUpEnvironment", &setUpEnvironment)
+	parseHookMatcherType(rawHooks, "Stop", &stop)
+	parseHookMatcherType(rawHooks, "SubagentStop", &subagentStop)
+	parseHookMatcherType(rawHooks, "SessionEnd", &sessionEnd)
 
 	// Remove Entire hooks from all hook types
 	preToolUse = removeEntireHooks(preToolUse)
@@ -331,10 +329,10 @@ func (i *IFlowCLIAgent) UninstallHooks(ctx context.Context) error {
 	sessionStart = removeEntireHooks(sessionStart)
 	userPromptSubmit = removeEntireHooks(userPromptSubmit)
 	notification = removeEntireHooks(notification)
-	setUpEnvironment = removeEntireHookEntries(setUpEnvironment)
-	stop = removeEntireHookEntries(stop)
-	subagentStop = removeEntireHookEntries(subagentStop)
-	sessionEnd = removeEntireHookEntries(sessionEnd)
+	setUpEnvironment = removeEntireHooks(setUpEnvironment)
+	stop = removeEntireHooks(stop)
+	subagentStop = removeEntireHooks(subagentStop)
+	sessionEnd = removeEntireHooks(sessionEnd)
 
 	// Marshal modified hook types back to rawHooks
 	marshalHookMatcherType(rawHooks, "PreToolUse", preToolUse)
@@ -342,10 +340,10 @@ func (i *IFlowCLIAgent) UninstallHooks(ctx context.Context) error {
 	marshalHookMatcherType(rawHooks, "SessionStart", sessionStart)
 	marshalHookMatcherType(rawHooks, "UserPromptSubmit", userPromptSubmit)
 	marshalHookMatcherType(rawHooks, "Notification", notification)
-	marshalHookEntryType(rawHooks, "SetUpEnvironment", setUpEnvironment)
-	marshalHookEntryType(rawHooks, "Stop", stop)
-	marshalHookEntryType(rawHooks, "SubagentStop", subagentStop)
-	marshalHookEntryType(rawHooks, "SessionEnd", sessionEnd)
+	marshalHookMatcherType(rawHooks, "SetUpEnvironment", setUpEnvironment)
+	marshalHookMatcherType(rawHooks, "Stop", stop)
+	marshalHookMatcherType(rawHooks, "SubagentStop", subagentStop)
+	marshalHookMatcherType(rawHooks, "SessionEnd", sessionEnd)
 
 	// Also remove the metadata deny rule from permissions
 	var rawPermissions map[string]json.RawMessage
@@ -425,20 +423,14 @@ func (i *IFlowCLIAgent) AreHooksInstalled(ctx context.Context) bool {
 		return false
 	}
 
-	// Check for at least one of our hooks
-	return hookEntryExists("entire hooks iflow stop", settings.Hooks.Stop) ||
-		hookEntryExists("go run ${IFLOW_PROJECT_DIR}/cmd/entire/main.go hooks iflow stop", settings.Hooks.Stop)
+	// Check for at least one of our hooks in Stop hook configuration
+	return hookMatcherHasCommand(settings.Hooks.Stop, "entire hooks iflow stop") ||
+		hookMatcherHasCommand(settings.Hooks.Stop, "go run ${IFLOW_PROJECT_DIR}/cmd/entire/main.go hooks iflow stop")
 }
 
 // Helper functions for hook management
 
 func parseHookMatcherType(rawHooks map[string]json.RawMessage, hookType string, target *[]IFlowHookMatcher) {
-	if data, ok := rawHooks[hookType]; ok {
-		json.Unmarshal(data, target)
-	}
-}
-
-func parseHookEntryType(rawHooks map[string]json.RawMessage, hookType string, target *[]IFlowHookEntry) {
 	if data, ok := rawHooks[hookType]; ok {
 		json.Unmarshal(data, target)
 	}
@@ -450,18 +442,6 @@ func marshalHookMatcherType(rawHooks map[string]json.RawMessage, hookType string
 		return
 	}
 	data, err := json.Marshal(matchers)
-	if err != nil {
-		return
-	}
-	rawHooks[hookType] = data
-}
-
-func marshalHookEntryType(rawHooks map[string]json.RawMessage, hookType string, entries []IFlowHookEntry) {
-	if len(entries) == 0 {
-		delete(rawHooks, hookType)
-		return
-	}
-	data, err := json.Marshal(entries)
 	if err != nil {
 		return
 	}
@@ -494,16 +474,6 @@ func removeEntireHooks(matchers []IFlowHookMatcher) []IFlowHookMatcher {
 	return result
 }
 
-func removeEntireHookEntries(entries []IFlowHookEntry) []IFlowHookEntry {
-	result := make([]IFlowHookEntry, 0, len(entries))
-	for _, entry := range entries {
-		if !isEntireHook(entry.Command) {
-			result = append(result, entry)
-		}
-	}
-	return result
-}
-
 func hookMatcherExists(matchers []IFlowHookMatcher, matcherPattern, command string) bool {
 	for _, matcher := range matchers {
 		if matcher.Matcher == matcherPattern {
@@ -512,15 +482,6 @@ func hookMatcherExists(matchers []IFlowHookMatcher, matcherPattern, command stri
 					return true
 				}
 			}
-		}
-	}
-	return false
-}
-
-func hookEntryExists(command string, entries []IFlowHookEntry) bool {
-	for _, entry := range entries {
-		if entry.Command == command {
-			return true
 		}
 	}
 	return false

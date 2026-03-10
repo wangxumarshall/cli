@@ -9,14 +9,15 @@ type IFlowSettings struct {
 }
 
 // IFlowHooks contains the hook configurations
+// All hooks use IFlowHookMatcher format (with hooks array wrapper) per iFlow CLI specification
 type IFlowHooks struct {
 	PreToolUse       []IFlowHookMatcher `json:"PreToolUse,omitempty"`
 	PostToolUse      []IFlowHookMatcher `json:"PostToolUse,omitempty"`
-	SetUpEnvironment []IFlowHookEntry   `json:"SetUpEnvironment,omitempty"`
-	Stop             []IFlowHookEntry   `json:"Stop,omitempty"`
-	SubagentStop     []IFlowHookEntry   `json:"SubagentStop,omitempty"`
+	SetUpEnvironment []IFlowHookMatcher `json:"SetUpEnvironment,omitempty"`
+	Stop             []IFlowHookMatcher `json:"Stop,omitempty"`
+	SubagentStop     []IFlowHookMatcher `json:"SubagentStop,omitempty"`
 	SessionStart     []IFlowHookMatcher `json:"SessionStart,omitempty"`
-	SessionEnd       []IFlowHookEntry   `json:"SessionEnd,omitempty"`
+	SessionEnd       []IFlowHookMatcher `json:"SessionEnd,omitempty"`
 	UserPromptSubmit []IFlowHookMatcher `json:"UserPromptSubmit,omitempty"`
 	Notification     []IFlowHookMatcher `json:"Notification,omitempty"`
 }
@@ -52,6 +53,7 @@ type BaseHookInput struct {
 // ToolHookInput is the JSON structure from PreToolUse/PostToolUse hooks
 type ToolHookInput struct {
 	BaseHookInput
+
 	ToolName     string          `json:"tool_name"`
 	ToolAliases  []string        `json:"tool_aliases,omitempty"`
 	ToolInput    json.RawMessage `json:"tool_input"`
@@ -66,12 +68,14 @@ type ToolResponseContent struct {
 // UserPromptSubmitInput is the JSON structure from UserPromptSubmit hook
 type UserPromptSubmitInput struct {
 	BaseHookInput
+
 	Prompt string `json:"prompt"`
 }
 
 // SessionStartInput is the JSON structure from SessionStart hook
 type SessionStartInput struct {
 	BaseHookInput
+
 	Source string `json:"source,omitempty"` // startup, resume, clear, compress
 	Model  string `json:"model,omitempty"`
 }
@@ -79,12 +83,14 @@ type SessionStartInput struct {
 // NotificationInput is the JSON structure from Notification hook
 type NotificationInput struct {
 	BaseHookInput
+
 	Message string `json:"message"`
 }
 
 // StopInput is the JSON structure from Stop hook
 type StopInput struct {
 	BaseHookInput
+
 	DurationMs int64 `json:"duration_ms,omitempty"`
 	TurnCount  int   `json:"turn_count,omitempty"`
 }
@@ -92,6 +98,7 @@ type StopInput struct {
 // SubagentStopInput is the JSON structure from SubagentStop hook
 type SubagentStopInput struct {
 	BaseHookInput
+
 	SubagentID string `json:"subagent_id,omitempty"`
 	DurationMs int64  `json:"duration_ms,omitempty"`
 }
