@@ -219,14 +219,22 @@ func resolveLatestCheckpoint(ctx context.Context, repo *git.Repository, checkpoi
 }
 
 // getMetadataTree returns the metadata branch tree, trying local first,
-// then fetching from remote, then falling back to the remote tree directly.
+// then treeless fetch, then full fetch, then remote tree directly.
 func getMetadataTree(ctx context.Context, repo *git.Repository) (*object.Tree, error) {
 	metadataTree, err := strategy.GetMetadataBranchTree(repo)
 	if err == nil {
 		return metadataTree, nil
 	}
 
-	// Try fetching from remote
+	// Try treeless fetch first (only downloads commit + tree objects, no blobs)
+	if fetchErr := FetchMetadataTreeOnly(ctx); fetchErr == nil {
+		metadataTree, err = strategy.GetMetadataBranchTree(repo)
+		if err == nil {
+			return metadataTree, nil
+		}
+	}
+
+	// Fallback: full fetch from remote
 	if fetchErr := FetchMetadataBranch(ctx); fetchErr == nil {
 		metadataTree, err = strategy.GetMetadataBranchTree(repo)
 		if err == nil {
@@ -240,6 +248,38 @@ func getMetadataTree(ctx context.Context, repo *git.Repository) (*object.Tree, e
 		return nil, fmt.Errorf("metadata branch not available: %w", remoteErr)
 	}
 	return remoteTree, nil
+}
+
+// ensureTranscriptBlobs checks which transcript blobs for a checkpoint are
+// present in the local object store (via go-git) and fetches any missing
+// ones from the remote (via git CLI).
+// This enables the treeless-fetch optimization: tree objects are fetched first,
+// then only the specific full.jsonl blobs needed for resume are downloaded.
+func ensureTranscriptBlobs(ctx context.Context, repo *git.Repository, checkpointID id.CheckpointID) error {
+	metadataTree, err := strategy.GetMetadataBranchTree(repo)
+	if err != nil {
+		// If we can't get the tree, blobs can't be checked — caller will handle the error
+		return nil //nolint:nilerr // Tree unavailable means no sparse fetch possible
+	}
+
+	refs, err := checkpoint.CollectTranscriptBlobHashes(metadataTree, checkpointID)
+	if err != nil {
+		// Tree navigation failed — not fatal, ReadSessionContent will fail with a clear error
+		return nil //nolint:nilerr // Best-effort blob prefetch
+	}
+
+	resolver := checkpoint.NewBlobResolver(repo.Storer)
+	var missing []plumbing.Hash
+	for _, ref := range refs {
+		if !resolver.HasBlob(ref.Hash) {
+			missing = append(missing, ref.Hash)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+
+	return FetchBlobsByHash(ctx, missing)
 }
 
 // branchCheckpointsResult contains the result of searching for checkpoints on a branch.
@@ -464,6 +504,18 @@ func resumeSession(ctx context.Context, metadata *strategy.CheckpointInfo, force
 
 	// Get strategy and restore sessions using full checkpoint data
 	strat := GetStrategy(ctx)
+
+	// Ensure transcript blobs are available locally before RestoreLogsOnly reads them.
+	// After a treeless fetch, tree objects are present but full.jsonl blobs may not be.
+	// This fetches only the specific blobs needed for this checkpoint.
+	repo, repoErr := openRepository(ctx)
+	if repoErr == nil {
+		if blobErr := ensureTranscriptBlobs(ctx, repo, checkpointID); blobErr != nil {
+			logging.Warn(logCtx, "failed to ensure transcript blobs, restore may fail",
+				slog.String("error", blobErr.Error()),
+			)
+		}
+	}
 
 	// Use RestoreLogsOnly via LogsOnlyRestorer interface for multi-session support
 	// Create a logs-only rewind point with Agent populated (same as rewind)

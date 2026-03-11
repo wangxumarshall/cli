@@ -394,3 +394,84 @@ func FetchMetadataBranch(ctx context.Context) error {
 
 	return nil
 }
+
+// FetchMetadataTreeOnly fetches the entire/checkpoints/v1 branch from origin
+// with --filter=blob:none, downloading only commit and tree objects.
+// After this call, tree navigation via go-git works but blob reads will fail
+// for objects that weren't previously fetched.
+// Uses git CLI for credential helper support.
+func FetchMetadataTreeOnly(ctx context.Context) error {
+	branchName := paths.MetadataBranchName
+
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+
+	refSpec := fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", branchName, branchName)
+
+	fetchCmd := exec.CommandContext(ctx, "git", "fetch", "--filter=blob:none", "origin", refSpec)
+	if output, err := fetchCmd.CombinedOutput(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return errors.New("treeless fetch timed out after 2 minutes")
+		}
+		return fmt.Errorf("failed to treeless-fetch %s from origin: %s: %w", branchName, strings.TrimSpace(string(output)), err)
+	}
+
+	repo, err := openRepository(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to open repository: %w", err)
+	}
+
+	// Get the remote branch reference
+	remoteRef, err := repo.Reference(plumbing.NewRemoteReferenceName("origin", branchName), true)
+	if err != nil {
+		return fmt.Errorf("branch '%s' not found on origin: %w", branchName, err)
+	}
+
+	// Create or update local branch pointing to the same commit
+	localRef := plumbing.NewHashReference(plumbing.NewBranchReferenceName(branchName), remoteRef.Hash())
+	if err := repo.Storer.SetReference(localRef); err != nil {
+		return fmt.Errorf("failed to create local %s branch: %w", branchName, err)
+	}
+
+	return nil
+}
+
+// FetchBlobsByHash fetches specific blob objects from the remote by their SHA-1 hashes.
+// Uses git fetch-pack to request individual objects, which works when the server
+// supports allow-reachable-sha1-in-want (GitHub, GitLab, Bitbucket all do).
+//
+// If fetch-pack fails (e.g., old server without SHA-in-want support), falls back
+// to a full metadata branch fetch.
+func FetchBlobsByHash(ctx context.Context, hashes []plumbing.Hash) error {
+	if len(hashes) == 0 {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+
+	// Get remote URL for fetch-pack
+	urlCmd := exec.CommandContext(ctx, "git", "remote", "get-url", "origin")
+	urlOutput, err := urlCmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to get remote URL: %w", err)
+	}
+	remoteURL := strings.TrimSpace(string(urlOutput))
+
+	// Build fetch-pack args with blob hashes
+	args := []string{"fetch-pack", "--thin", "--no-progress", remoteURL}
+	for _, h := range hashes {
+		args = append(args, h.String())
+	}
+
+	fetchCmd := exec.CommandContext(ctx, "git", args...)
+	if output, fetchErr := fetchCmd.CombinedOutput(); fetchErr != nil {
+		// Fallback: full metadata branch fetch (pack negotiation skips already-local objects)
+		if fallbackErr := FetchMetadataBranch(ctx); fallbackErr != nil {
+			return fmt.Errorf("fetch-pack failed (%s: %w) and fallback fetch also failed: %w",
+				strings.TrimSpace(string(output)), fetchErr, fallbackErr)
+		}
+	}
+
+	return nil
+}
