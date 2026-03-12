@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -68,26 +69,39 @@ func doPushBranch(ctx context.Context, target, branchName string) error {
 	if isURL(target) {
 		displayTarget = "checkpoint remote"
 	}
-	fmt.Fprintf(os.Stderr, "[entire] Pushing %s to %s...\n", branchName, displayTarget)
+
+	fmt.Fprintf(os.Stderr, "[entire] Pushing %s to %s...", branchName, displayTarget)
+	stop := startProgressDots(os.Stderr)
 
 	// Try pushing first
 	if err := tryPushSessionsCommon(ctx, target, branchName); err == nil {
+		stop(" done")
 		return nil
 	}
+	stop("")
 
 	// Push failed - likely non-fast-forward. Try to fetch and merge.
-	fmt.Fprintf(os.Stderr, "[entire] Syncing %s with remote...\n", branchName)
+	fmt.Fprintf(os.Stderr, "[entire] Syncing %s with remote...", branchName)
+	stop = startProgressDots(os.Stderr)
 
 	if err := fetchAndMergeSessionsCommon(ctx, target, branchName); err != nil {
+		stop("")
 		fmt.Fprintf(os.Stderr, "[entire] Warning: couldn't sync %s: %v\n", branchName, err)
 		printCheckpointRemoteHint(target)
 		return nil // Don't fail the main push
 	}
+	stop(" done")
 
 	// Try pushing again after merge
+	fmt.Fprintf(os.Stderr, "[entire] Pushing %s to %s...", branchName, displayTarget)
+	stop = startProgressDots(os.Stderr)
+
 	if err := tryPushSessionsCommon(ctx, target, branchName); err != nil {
+		stop("")
 		fmt.Fprintf(os.Stderr, "[entire] Warning: failed to push %s after sync: %v\n", branchName, err)
 		printCheckpointRemoteHint(target)
+	} else {
+		stop(" done")
 	}
 
 	return nil
@@ -230,6 +244,31 @@ func fetchAndMergeSessionsCommon(ctx context.Context, target, branchName string)
 	}
 
 	return nil
+}
+
+// startProgressDots prints dots to w every second until the returned stop function
+// is called. The stop function prints the given suffix and a newline.
+func startProgressDots(w io.Writer) func(suffix string) {
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				fmt.Fprint(w, ".")
+			}
+		}
+	}()
+	return func(suffix string) {
+		close(done)
+		<-stopped // Wait for goroutine to finish before writing suffix
+		fmt.Fprintln(w, suffix)
+	}
 }
 
 // isURL returns true if the target looks like a URL rather than a git remote name.
