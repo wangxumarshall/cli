@@ -1,8 +1,12 @@
 package strategy
 
 import (
+	"context"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
+	"github.com/entireio/cli/cmd/entire/cli/paths"
 	"github.com/entireio/cli/cmd/entire/cli/testutil"
 
 	"github.com/go-git/go-git/v6"
@@ -63,4 +67,127 @@ func TestHasUnpushedSessionsCommon(t *testing.T) {
 		differentHash := plumbing.NewHash("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 		assert.True(t, hasUnpushedSessionsCommon(repo, "origin", differentHash, branchName))
 	})
+}
+
+// TestDoPushBranch_UnreachableTarget_ReturnsNil exercises the graceful degradation
+// path in doPushBranch: when the push target is unreachable, the function logs a
+// warning and returns nil (no error). This is the core behavior that ensures a
+// failing checkpoint remote never blocks the user's main push.
+//
+// Not parallel: uses t.Chdir() (required for OpenRepository in fetchAndMergeSessionsCommon).
+func TestDoPushBranch_UnreachableTarget_ReturnsNil(t *testing.T) {
+	tmpDir := t.TempDir()
+	testutil.InitRepo(t, tmpDir)
+	testutil.WriteFile(t, tmpDir, "f.txt", "init")
+	testutil.GitAdd(t, tmpDir, "f.txt")
+	testutil.GitCommit(t, tmpDir, "init")
+
+	// Create a local checkpoint branch so doPushBranch has something to push.
+	branchName := paths.MetadataBranchName
+	repo, err := git.PlainOpen(tmpDir)
+	require.NoError(t, err)
+
+	head, err := repo.Head()
+	require.NoError(t, err)
+
+	localRef := plumbing.NewHashReference(plumbing.NewBranchReferenceName(branchName), head.Hash())
+	require.NoError(t, repo.Storer.SetReference(localRef))
+
+	t.Chdir(tmpDir)
+
+	ctx := context.Background()
+
+	// Use a non-existent path as the push target. doPushBranch will:
+	// 1. Try to push (fails — target doesn't exist)
+	// 2. Try to fetch+merge (fails — can't fetch from non-existent path)
+	// 3. Log warning and return nil (graceful degradation)
+	nonExistentPath := filepath.Join(t.TempDir(), "does-not-exist")
+	err = doPushBranch(ctx, nonExistentPath, branchName)
+	assert.NoError(t, err, "doPushBranch should return nil when target is unreachable (graceful degradation)")
+}
+
+// TestPushBranchIfNeeded_UnreachableTarget_ReturnsNil exercises the full push path
+// through pushBranchIfNeeded with an unreachable local path target. This verifies
+// that the complete production code path (branch existence check -> push attempt ->
+// graceful failure) works end-to-end.
+//
+// Not parallel: uses t.Chdir() (required for OpenRepository).
+func TestPushBranchIfNeeded_UnreachableTarget_ReturnsNil(t *testing.T) {
+	tmpDir := t.TempDir()
+	testutil.InitRepo(t, tmpDir)
+	testutil.WriteFile(t, tmpDir, "f.txt", "init")
+	testutil.GitAdd(t, tmpDir, "f.txt")
+	testutil.GitCommit(t, tmpDir, "init")
+
+	// Create the checkpoint branch locally.
+	branchName := paths.MetadataBranchName
+	repo, err := git.PlainOpen(tmpDir)
+	require.NoError(t, err)
+
+	head, err := repo.Head()
+	require.NoError(t, err)
+
+	localRef := plumbing.NewHashReference(plumbing.NewBranchReferenceName(branchName), head.Hash())
+	require.NoError(t, repo.Storer.SetReference(localRef))
+
+	t.Chdir(tmpDir)
+
+	ctx := context.Background()
+
+	// Push to a non-existent path. pushBranchIfNeeded will:
+	// 1. Open repository (CWD-based)
+	// 2. Verify branch exists locally
+	// 3. Since target is not a URL (no :// or @), check hasUnpushedSessionsCommon
+	//    which finds no remote tracking ref -> returns true (has unpushed)
+	// 4. Call doPushBranch which fails gracefully
+	nonExistentPath := filepath.Join(t.TempDir(), "does-not-exist")
+	err = pushBranchIfNeeded(ctx, nonExistentPath, branchName)
+	assert.NoError(t, err, "pushBranchIfNeeded should return nil when target is unreachable")
+}
+
+// TestPushBranchIfNeeded_LocalBareRepo_PushesSuccessfully verifies that
+// pushBranchIfNeeded works with a local bare repo path as the target.
+// This exercises the same code path that PrePush uses when pushTarget()
+// returns a URL, but with a local path. It validates the core routing
+// behavior: a branch can be pushed to an arbitrary target path.
+//
+// Not parallel: uses t.Chdir() (required for OpenRepository).
+func TestPushBranchIfNeeded_LocalBareRepo_PushesSuccessfully(t *testing.T) {
+	ctx := context.Background()
+
+	tmpDir := t.TempDir()
+	testutil.InitRepo(t, tmpDir)
+	testutil.WriteFile(t, tmpDir, "f.txt", "init")
+	testutil.GitAdd(t, tmpDir, "f.txt")
+	testutil.GitCommit(t, tmpDir, "init")
+
+	// Create the checkpoint branch locally.
+	branchName := paths.MetadataBranchName
+	repo, err := git.PlainOpen(tmpDir)
+	require.NoError(t, err)
+
+	head, err := repo.Head()
+	require.NoError(t, err)
+
+	localRef := plumbing.NewHashReference(plumbing.NewBranchReferenceName(branchName), head.Hash())
+	require.NoError(t, repo.Storer.SetReference(localRef))
+
+	// Create a bare repo as the push target.
+	bareDir := t.TempDir()
+	initCmd := exec.CommandContext(ctx, "git", "init", "--bare")
+	initCmd.Dir = bareDir
+	initCmd.Env = testutil.GitIsolatedEnv()
+	require.NoError(t, initCmd.Run())
+
+	t.Chdir(tmpDir)
+
+	// Push using pushBranchIfNeeded with the bare repo path as target.
+	err = pushBranchIfNeeded(ctx, bareDir, branchName)
+	require.NoError(t, err, "pushBranchIfNeeded should succeed with a local bare repo target")
+
+	// Verify the branch arrived on the bare repo.
+	verifyCmd := exec.CommandContext(ctx, "git", "show-ref", "--verify", "--quiet", "refs/heads/"+branchName)
+	verifyCmd.Dir = bareDir
+	verifyCmd.Env = testutil.GitIsolatedEnv()
+	assert.NoError(t, verifyCmd.Run(), "branch should exist on bare remote after push")
 }
