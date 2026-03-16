@@ -10,6 +10,7 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing/object"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPreTaskStateFile(t *testing.T) {
@@ -73,9 +74,7 @@ func TestPrePromptState_BackwardCompat_LastTranscriptLineCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadPrePromptState() error = %v", err)
 	}
-	if state == nil {
-		t.Fatal("LoadPrePromptState() returned nil")
-	}
+	require.NotNil(t, state, "LoadPrePromptState() returned nil")
 
 	if state.TranscriptOffset != 42 {
 		t.Errorf("TranscriptOffset = %d, want 42 (migrated from last_transcript_line_count)", state.TranscriptOffset)
@@ -413,9 +412,7 @@ func TestPrePromptState_WithSummaryOnlyTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadPrePromptState() error = %v", err)
 	}
-	if state == nil {
-		t.Fatal("LoadPrePromptState() returned nil")
-	}
+	require.NotNil(t, state, "LoadPrePromptState() returned nil")
 
 	// TranscriptOffset should be 2 (2 JSONL lines counted by ClaudeCodeAgent)
 	if state.TranscriptOffset != 2 {

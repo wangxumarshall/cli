@@ -44,7 +44,7 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err //nolint:wrapcheck // already present in codebase
 	}
-	if err := os.WriteFile(dst, input, 0o600); err != nil {
+	if err := os.WriteFile(dst, input, 0o600); err != nil { //nolint:gosec // path from internal metadata
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 	return nil
