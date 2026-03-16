@@ -28,7 +28,8 @@ func NewStoreWithService(service string) *Store {
 
 // SaveToken persists an access token for the given base URL.
 func (s *Store) SaveToken(baseURL, token string) error {
-	if strings.TrimSpace(token) == "" {
+	token = strings.TrimSpace(token)
+	if token == "" {
 		return errors.New("refusing to save empty token")
 	}
 

@@ -85,6 +85,23 @@ func TestStoreSaveToken_RejectsEmptyToken(t *testing.T) {
 	}
 }
 
+func TestStoreSaveToken_TrimsWhitespace(t *testing.T) {
+	// Not parallel: go-keyring's mock provider uses an unprotected map.
+	store := NewStoreWithService("test-trim")
+
+	if err := store.SaveToken("https://entire.io", "  my-token  "); err != nil {
+		t.Fatalf("SaveToken() error = %v", err)
+	}
+
+	got, err := store.GetToken("https://entire.io")
+	if err != nil {
+		t.Fatalf("GetToken() error = %v", err)
+	}
+	if got != "my-token" {
+		t.Fatalf("GetToken() = %q, want %q (whitespace should be trimmed)", got, "my-token")
+	}
+}
+
 func TestStoreDeleteToken(t *testing.T) {
 	// Not parallel: go-keyring's mock provider uses an unprotected map.
 	store := NewStoreWithService("test-delete")
