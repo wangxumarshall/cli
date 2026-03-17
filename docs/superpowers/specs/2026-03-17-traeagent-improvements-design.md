@@ -94,35 +94,20 @@ type TraeHooksConfig struct {
 }
 ```
 
-**从 transcript.go 提取**：
+**保留在 transcript.go**：
 ```go
-// Transcript 相关类型
-type TrajectoryEvent struct {
-    Type       string          `json:"type"`
-    Timestamp  string          `json:"timestamp"`
-    EventID    string          `json:"event_id"`
-    Content    json.RawMessage `json:"content"`
-    ToolName   string          `json:"tool_name,omitempty"`
-    ToolUseID  string          `json:"tool_use_id,omitempty"`
-    ToolInput  json.RawMessage `json:"tool_input,omitempty"`
-    ToolOutput json.RawMessage `json:"tool_output,omitempty"`
-    ModelName  string          `json:"model_name,omitempty"`
-    Prompt     string          `json:"prompt,omitempty"`
-    Response   string          `json:"response,omitempty"`
-    TokenUsage json.RawMessage `json:"token_usage,omitempty"`
-}
-
-type Trajectory struct {
-    SessionID string            `json:"session_id"`
-    StartTime string            `json:"start_time"`
-    EndTime   string            `json:"end_time,omitempty"`
-    Events    []TrajectoryEvent `json:"events"`
-}
+// Transcript 相关类型 - 保留在 transcript.go 中（与 transcript 解析逻辑紧密相关）
+type TrajectoryEvent struct { ... }
+type Trajectory struct { ... }
 ```
+
+> 注意：`TrajectoryEvent` 和 `Trajectory` 类型保留在 `transcript.go` 中，因为它们与 transcript 解析逻辑紧密相关。`types.go` 仅包含 Hook 配置和输入解析类型。
 
 ### 2. lifecycle.go（新增）
 
 从 `hooks.go` 中提取生命周期事件处理逻辑：
+
+> 注意：`ParseHookInput` 保留在 `traeagent.go` 中（属于核心 Agent 接口），`ParseHookEvent` 及其解析方法移动到 `lifecycle.go`。
 
 ```go
 // Package traeagent implements the Agent interface for Trae Agent.
