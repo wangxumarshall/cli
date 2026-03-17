@@ -104,6 +104,12 @@ entire disable
 
 Removes the git hooks. Your code and commit history remain untouched.
 
+## E2E Triage
+
+E2E failure alerts can be triaged from Slack by replying `triage e2e` in the failure thread. The workflow is documented in [docs/architecture/slack-e2e-triage.md](/Users/alisha/Projects/wt/e2e-triage-ci-job/docs/architecture/slack-e2e-triage.md).
+
+The Slack bridge is handled by `cmd/e2e-triage-dispatch`, and the triage job itself runs in [`.github/workflows/e2e-triage.yml`](/Users/alisha/Projects/wt/e2e-triage-ci-job/.github/workflows/e2e-triage.yml). If Slack is unavailable, you can trigger the workflow manually with `workflow_dispatch` using the failed run URL, commit SHA, and failed agents.
+
 ## Key Concepts
 
 ### Sessions
