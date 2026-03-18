@@ -11,8 +11,10 @@ import (
 	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
-	_ "github.com/entireio/cli/cmd/entire/cli/agent/claudecode" // register agent
-	_ "github.com/entireio/cli/cmd/entire/cli/agent/geminicli"  // register agent
+	_ "github.com/entireio/cli/cmd/entire/cli/agent/claudecode"     // register agent
+	_ "github.com/entireio/cli/cmd/entire/cli/agent/cursor"         // register agent
+	_ "github.com/entireio/cli/cmd/entire/cli/agent/factoryaidroid" // register agent
+	_ "github.com/entireio/cli/cmd/entire/cli/agent/geminicli"      // register agent
 	"github.com/entireio/cli/cmd/entire/cli/session"
 	"github.com/entireio/cli/cmd/entire/cli/testutil"
 )
@@ -472,6 +474,147 @@ func TestAttach_GeminiSuccess(t *testing.T) {
 	}
 	if string(promptData) != "fix the login bug" {
 		t.Errorf("prompt.txt = %q, want %q", string(promptData), "fix the login bug")
+	}
+}
+
+func TestAttach_CursorSuccess(t *testing.T) {
+	tmpDir := setupAttachTestRepo(t)
+
+	cursorDir := t.TempDir()
+	t.Setenv("ENTIRE_TEST_CURSOR_PROJECT_DIR", cursorDir)
+
+	sessionID := "test-attach-cursor-session"
+	// Cursor uses JSONL format, same as Claude Code
+	transcriptContent := `{"type":"user","message":{"role":"user","content":"add dark mode"},"uuid":"u1"}
+{"type":"assistant","message":{"role":"assistant","content":"I'll add dark mode support."},"uuid":"a1"}
+`
+	// Cursor flat layout: <dir>/<id>.jsonl
+	if err := os.WriteFile(filepath.Join(cursorDir, sessionID+".jsonl"), []byte(transcriptContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	err := runAttach(context.Background(), &out, sessionID, agent.AgentNameCursor, false)
+	if err != nil {
+		t.Fatalf("runAttach failed: %v", err)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "Attached session") {
+		t.Errorf("expected 'Attached session' in output, got: %s", output)
+	}
+
+	store, err := session.NewStateStore(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Load(context.Background(), sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state == nil {
+		t.Fatal("expected session state to be created")
+	}
+	if state.AgentType != agent.AgentTypeCursor {
+		t.Errorf("AgentType = %q, want %q", state.AgentType, agent.AgentTypeCursor)
+	}
+	if state.SessionTurnCount != 1 {
+		t.Errorf("SessionTurnCount = %d, want 1", state.SessionTurnCount)
+	}
+
+	// Verify prompt.txt was written
+	promptFile := filepath.Join(tmpDir, ".entire", "metadata", sessionID, "prompt.txt")
+	promptData, err := os.ReadFile(promptFile)
+	if err != nil {
+		t.Fatalf("prompt.txt not found: %v", err)
+	}
+	if string(promptData) != "add dark mode" {
+		t.Errorf("prompt.txt = %q, want %q", string(promptData), "add dark mode")
+	}
+}
+
+func TestAttach_FactoryAIDroidSuccess(t *testing.T) {
+	tmpDir := setupAttachTestRepo(t)
+
+	droidDir := t.TempDir()
+	t.Setenv("ENTIRE_TEST_DROID_PROJECT_DIR", droidDir)
+
+	sessionID := "test-attach-droid-session"
+	// Factory AI Droid uses JSONL format
+	transcriptContent := `{"type":"user","message":{"role":"user","content":"deploy to staging"},"uuid":"u1"}
+{"type":"assistant","message":{"role":"assistant","content":"Deploying to staging now."},"uuid":"a1"}
+`
+	// Factory AI Droid: flat <dir>/<id>.jsonl
+	if err := os.WriteFile(filepath.Join(droidDir, sessionID+".jsonl"), []byte(transcriptContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	err := runAttach(context.Background(), &out, sessionID, agent.AgentNameFactoryAIDroid, false)
+	if err != nil {
+		t.Fatalf("runAttach failed: %v", err)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "Attached session") {
+		t.Errorf("expected 'Attached session' in output, got: %s", output)
+	}
+
+	store, err := session.NewStateStore(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Load(context.Background(), sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state == nil {
+		t.Fatal("expected session state to be created")
+	}
+	if state.AgentType != agent.AgentTypeFactoryAIDroid {
+		t.Errorf("AgentType = %q, want %q", state.AgentType, agent.AgentTypeFactoryAIDroid)
+	}
+	if state.SessionTurnCount != 1 {
+		t.Errorf("SessionTurnCount = %d, want 1", state.SessionTurnCount)
+	}
+
+	// Verify prompt.txt was written
+	promptFile := filepath.Join(tmpDir, ".entire", "metadata", sessionID, "prompt.txt")
+	promptData, err := os.ReadFile(promptFile)
+	if err != nil {
+		t.Fatalf("prompt.txt not found: %v", err)
+	}
+	if string(promptData) != "deploy to staging" {
+		t.Errorf("prompt.txt = %q, want %q", string(promptData), "deploy to staging")
+	}
+}
+
+func TestAttach_CursorNestedLayout(t *testing.T) {
+	setupAttachTestRepo(t)
+
+	cursorDir := t.TempDir()
+	t.Setenv("ENTIRE_TEST_CURSOR_PROJECT_DIR", cursorDir)
+
+	sessionID := "test-cursor-nested-layout"
+	transcriptContent := `{"type":"user","message":{"role":"user","content":"hello"},"uuid":"u1"}
+`
+	// Cursor IDE nested layout: <dir>/<id>/<id>.jsonl
+	nestedDir := filepath.Join(cursorDir, sessionID)
+	if err := os.MkdirAll(nestedDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedDir, sessionID+".jsonl"), []byte(transcriptContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	err := runAttach(context.Background(), &out, sessionID, agent.AgentNameCursor, false)
+	if err != nil {
+		t.Fatalf("runAttach failed: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "Attached session") {
+		t.Errorf("expected 'Attached session' in output, got: %s", out.String())
 	}
 }
 
