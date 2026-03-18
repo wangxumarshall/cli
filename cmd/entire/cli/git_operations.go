@@ -5,10 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/entireio/cli/cmd/entire/cli/logging"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 	"github.com/entireio/cli/cmd/entire/cli/strategy"
 
@@ -481,6 +483,11 @@ func FetchBlobsByHash(ctx context.Context, hashes []plumbing.Hash) error {
 
 	fetchCmd := exec.CommandContext(ctx, "git", args...)
 	if output, fetchErr := fetchCmd.CombinedOutput(); fetchErr != nil {
+		logging.Debug(ctx, "fetch-pack failed, falling back to full metadata fetch",
+			slog.Int("blob_count", len(hashes)),
+			slog.String("error", fetchErr.Error()),
+			slog.String("output", strings.TrimSpace(string(output))),
+		)
 		// Fallback: full metadata branch fetch (pack negotiation skips already-local objects)
 		if fallbackErr := FetchMetadataBranch(ctx); fallbackErr != nil {
 			return fmt.Errorf("fetch-pack failed (%s: %w) and fallback fetch also failed: %w",
