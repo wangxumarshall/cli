@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/url"
+	"os"
 	"os/exec"
 	"runtime"
 	"time"
@@ -46,7 +48,7 @@ func newLoginCmd() *cobra.Command {
 				}
 			}
 
-			return runLogin(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr(), client, openBrowser)
+			return runLogin(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), client, openBrowser)
 		},
 	}
 
@@ -58,7 +60,7 @@ func newLoginCmd() *cobra.Command {
 	return cmd
 }
 
-func runLogin(ctx context.Context, inR io.Reader, outW, errW io.Writer, client deviceAuthClient, openURL browserOpenFunc) error {
+func runLogin(ctx context.Context, outW, errW io.Writer, client deviceAuthClient, openURL browserOpenFunc) error {
 	start, err := client.StartDeviceAuth(ctx)
 	if err != nil {
 		return fmt.Errorf("start login: %w", err)
@@ -73,23 +75,20 @@ func runLogin(ctx context.Context, inR io.Reader, outW, errW io.Writer, client d
 	if canPromptInteractively() {
 		fmt.Fprintf(outW, "Press Enter to open %s in your browser...", approvalURL)
 
-		// Wait for the user to press Enter.
-		buf := make([]byte, 1)
-		if _, err := inR.Read(buf); err != nil {
-			fmt.Fprintln(outW)
-		}
+		// Read from /dev/tty so we get a real keypress and don't consume piped stdin.
+		waitForEnter()
 
-		if err := openURL(ctx, approvalURL); err != nil {
-			fmt.Fprintf(errW, "\nWarning: failed to open browser: %v\n", err)
-			fmt.Fprintf(outW, "\nOpen the URL above in your browser to continue.\n")
-		}
-
-		fmt.Fprintln(outW, "\nWaiting for approval...")
+		fmt.Fprintln(outW)
 	} else {
 		fmt.Fprintf(outW, "Approval URL: %s\n", approvalURL)
-		fmt.Fprintln(outW, "Open the approval URL in your browser to continue.")
-		fmt.Fprintln(outW, "Waiting for approval...")
 	}
+
+	if err := openURL(ctx, approvalURL); err != nil {
+		fmt.Fprintf(errW, "Warning: failed to open browser: %v\n", err)
+		fmt.Fprintln(outW, "Open the approval URL in your browser to continue.")
+	}
+
+	fmt.Fprintln(outW, "Waiting for approval...")
 
 	token, err := waitForApproval(ctx, client, start.DeviceCode, start.ExpiresIn, start.Interval)
 	if err != nil {
@@ -166,6 +165,21 @@ func waitForApproval(ctx context.Context, poller deviceAuthClient, deviceCode st
 			return "", fmt.Errorf("wait for approval: %w", ctx.Err())
 		case <-time.After(pollInterval):
 		}
+	}
+}
+
+// waitForEnter reads a line from /dev/tty, blocking until the user presses Enter.
+// If /dev/tty cannot be opened (e.g. on Windows), it returns immediately.
+func waitForEnter() {
+	tty, err := os.Open("/dev/tty")
+	if err != nil {
+		return
+	}
+	defer tty.Close()
+
+	reader := bufio.NewReader(tty)
+	if _, err = reader.ReadString('\n'); err != nil {
+		return
 	}
 }
 
