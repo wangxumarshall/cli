@@ -1,14 +1,17 @@
 package geminicli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
+	"github.com/entireio/cli/cmd/entire/cli/logging"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 )
 
@@ -87,6 +90,19 @@ func (g *GeminiCLIAgent) InstallHooks(ctx context.Context, localDev bool, force 
 		rawHooks = make(map[string]json.RawMessage)
 	}
 
+	// Strip non-array values from hooks (removes legacy fields like "enabled": true
+	// that old Entire versions wrote directly into hooks, which Gemini CLI 0.33+
+	// rejects because hooks.additionalProperties requires arrays).
+	var cleanupDone bool
+	for key, val := range rawHooks {
+		trimmed := bytes.TrimSpace(val)
+		if len(trimmed) == 0 || trimmed[0] != '[' {
+			delete(rawHooks, key)
+			logging.Debug(ctx, "removed non-array field from hooks", slog.String("key", key))
+			cleanupDone = true
+		}
+	}
+
 	// Enable hooks via hooksConfig
 	// hooksConfig.Enabled must be true for Gemini CLI to execute hooks
 	hooksConfig.Enabled = true
@@ -117,7 +133,8 @@ func (g *GeminiCLIAgent) InstallHooks(ctx context.Context, localDev bool, force 
 
 	// Check for idempotency BEFORE removing hooks
 	// If the exact same hook command already exists, return 0 (no changes needed)
-	if !force {
+	// Skip early return if cleanup happened — we still need to write the file.
+	if !force && !cleanupDone {
 		existingCmd := getFirstEntireHookCommand(sessionStart)
 		expectedCmd := cmdPrefix + "session-start"
 		if existingCmd == expectedCmd {
@@ -271,6 +288,15 @@ func (g *GeminiCLIAgent) UninstallHooks(ctx context.Context) error {
 	}
 	if rawHooks == nil {
 		rawHooks = make(map[string]json.RawMessage)
+	}
+
+	// Strip non-array values from hooks (same migration as InstallHooks)
+	for key, val := range rawHooks {
+		trimmed := bytes.TrimSpace(val)
+		if len(trimmed) == 0 || trimmed[0] != '[' {
+			delete(rawHooks, key)
+			logging.Debug(ctx, "removed non-array field from hooks", slog.String("key", key))
+		}
 	}
 
 	// Parse only the hook types we need to modify

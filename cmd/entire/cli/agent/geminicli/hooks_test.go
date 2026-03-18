@@ -10,6 +10,8 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/agent/testutil"
 )
 
+const testMatcherStartup = "startup"
+
 func TestInstallHooks_FreshInstall(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Chdir(tempDir)
@@ -198,7 +200,7 @@ func TestInstallHooks_PreservesUserHooks(t *testing.T) {
 	// Verify user hook is still there
 	foundUserHook := false
 	for _, matcher := range settings.Hooks.SessionStart {
-		if matcher.Matcher == "startup" {
+		if matcher.Matcher == testMatcherStartup {
 			for _, hook := range matcher.Hooks {
 				if hook.Name == "my-hook" {
 					foundUserHook = true
@@ -439,7 +441,7 @@ func TestUninstallHooks_PreservesUserHooks(t *testing.T) {
 	}
 
 	// Verify it's the user hook
-	if settings.Hooks.SessionStart[0].Matcher != "startup" {
+	if settings.Hooks.SessionStart[0].Matcher != testMatcherStartup {
 		t.Error("user hook was removed during uninstall")
 	}
 }
@@ -493,6 +495,110 @@ func TestHookNames(t *testing.T) {
 		if names[i] != name {
 			t.Errorf("HookNames()[%d] = %q, want %q", i, names[i], name)
 		}
+	}
+}
+
+func TestInstallHooks_RemovesLegacyEnabledField(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Chdir(tempDir)
+
+	// Simulate settings.json written by old Entire that put "enabled": true inside hooks
+	writeGeminiSettings(t, tempDir, `{
+  "hooks": {
+    "enabled": true,
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [{"name": "my-hook", "type": "command", "command": "echo user-startup-hook"}]
+      }
+    ]
+  }
+}`)
+
+	agent := &GeminiCLIAgent{}
+	_, err := agent.InstallHooks(context.Background(), false, false)
+	if err != nil {
+		t.Fatalf("InstallHooks() error = %v", err)
+	}
+
+	// Verify "enabled" boolean is gone from hooks
+	rawHooks := testutil.ReadRawHooks(t, tempDir, ".gemini")
+	if _, ok := rawHooks["enabled"]; ok {
+		t.Error("legacy hooks.enabled field should have been removed")
+	}
+
+	// Verify the user hook in SessionStart is still present
+	settings := readGeminiSettings(t, tempDir)
+	foundUserHook := false
+	for _, matcher := range settings.Hooks.SessionStart {
+		if matcher.Matcher == testMatcherStartup {
+			for _, hook := range matcher.Hooks {
+				if hook.Name == "my-hook" {
+					foundUserHook = true
+				}
+			}
+		}
+	}
+	if !foundUserHook {
+		t.Error("user hook 'my-hook' should be preserved after legacy cleanup")
+	}
+}
+
+func TestInstallHooks_RemovesLegacyEnabledField_WhenAlreadyInstalled(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Chdir(tempDir)
+
+	// Hooks already installed but legacy "enabled": true is also present
+	writeGeminiSettings(t, tempDir, `{
+  "hooks": {
+    "enabled": true,
+    "SessionStart": [
+      {
+        "hooks": [{"name": "entire-session-start", "type": "command", "command": "entire hooks gemini session-start"}]
+      }
+    ]
+  }
+}`)
+
+	agent := &GeminiCLIAgent{}
+	_, err := agent.InstallHooks(context.Background(), false, false)
+	if err != nil {
+		t.Fatalf("InstallHooks() error = %v", err)
+	}
+
+	// Verify "enabled" boolean is gone even though idempotency would have fired
+	rawHooks := testutil.ReadRawHooks(t, tempDir, ".gemini")
+	if _, ok := rawHooks["enabled"]; ok {
+		t.Error("legacy hooks.enabled field should have been removed even when hooks were already installed")
+	}
+}
+
+func TestUninstallHooks_RemovesLegacyEnabledField(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Chdir(tempDir)
+
+	// Simulate legacy settings with "enabled": true inside hooks plus an Entire hook
+	writeGeminiSettings(t, tempDir, `{
+  "hooks": {
+    "enabled": true,
+    "SessionStart": [
+      {
+        "hooks": [{"name": "entire-session-start", "type": "command", "command": "entire hooks gemini session-start"}]
+      }
+    ]
+  }
+}`)
+
+	agent := &GeminiCLIAgent{}
+	err := agent.UninstallHooks(context.Background())
+	if err != nil {
+		t.Fatalf("UninstallHooks() error = %v", err)
+	}
+
+	// Verify "enabled" boolean is gone from hooks
+	rawHooks := testutil.ReadRawHooks(t, tempDir, ".gemini")
+	if _, ok := rawHooks["enabled"]; ok {
+		t.Error("legacy hooks.enabled field should have been removed by UninstallHooks")
 	}
 }
 
