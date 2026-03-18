@@ -2,12 +2,13 @@ package cli
 
 import (
 	"bufio"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -34,12 +35,19 @@ type traceEntry struct {
 // parseTraceEntry parses a JSON log line into a traceEntry.
 // Returns nil if the line is not valid JSON or is not a trace entry (msg != "perf").
 func parseTraceEntry(line string) *traceEntry {
+	// Cheap pre-filter: skip full JSON parse for lines that can't be perf entries.
+	// Most lines in the shared log file are non-perf, so this avoids the
+	// marshalling cost for the common reject path.
+	if !strings.Contains(line, `"msg":"perf"`) {
+		return nil
+	}
+
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(line), &raw); err != nil {
 		return nil
 	}
 
-	// Check that msg == "perf"
+	// Verify msg == "perf" after full parse (the pre-filter could match substrings)
 	var msg string
 	if msgRaw, ok := raw["msg"]; !ok {
 		return nil
@@ -52,13 +60,13 @@ func parseTraceEntry(line string) *traceEntry {
 	// Best-effort field extraction: missing or mistyped fields keep their
 	// zero values rather than discarding the entire entry.
 	if opRaw, ok := raw["op"]; ok {
-		_ = json.Unmarshal(opRaw, &entry.Op)
+		_ = json.Unmarshal(opRaw, &entry.Op) //nolint:errcheck // best-effort
 	}
 	if dRaw, ok := raw["duration_ms"]; ok {
-		_ = json.Unmarshal(dRaw, &entry.DurationMs)
+		_ = json.Unmarshal(dRaw, &entry.DurationMs) //nolint:errcheck // best-effort
 	}
 	if errRaw, ok := raw["error"]; ok {
-		_ = json.Unmarshal(errRaw, &entry.Error)
+		_ = json.Unmarshal(errRaw, &entry.Error) //nolint:errcheck // best-effort
 	}
 
 	// Extract time
@@ -136,7 +144,7 @@ func parseTraceEntry(line string) *traceEntry {
 			for idx := range subs {
 				indices = append(indices, idx)
 			}
-			sort.Ints(indices)
+			slices.Sort(indices)
 
 			subList := make([]traceStep, 0, len(subs))
 			for _, idx := range indices {
@@ -151,8 +159,8 @@ func parseTraceEntry(line string) *traceEntry {
 
 		steps = append(steps, step)
 	}
-	sort.Slice(steps, func(i, j int) bool {
-		return steps[i].Name < steps[j].Name
+	slices.SortFunc(steps, func(a, b traceStep) int {
+		return cmp.Compare(a.Name, b.Name)
 	})
 
 	entry.Steps = steps
@@ -219,9 +227,7 @@ func collectTraceEntries(logFile string, last int, hookFilter string) ([]traceEn
 	}
 
 	// Reverse so newest entries are first
-	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
-		entries[i], entries[j] = entries[j], entries[i]
-	}
+	slices.Reverse(entries)
 
 	return entries, nil
 }
