@@ -244,6 +244,20 @@ func resumeFromCurrentBranch(ctx context.Context, w, errW io.Writer, branchName 
 	// created new packfiles that the original repo's storer doesn't know about.
 	ft := checkpoint.NewFetchingTree(ctx, cpSubtree, freshRepo.Storer, FetchBlobsByHash)
 
+	// Batch-prefetch all missing blobs in one network round-trip instead of
+	// fetching one blob per File() call during metadata reads.
+	if prefetched, pfErr := ft.PreFetch(); pfErr != nil {
+		logging.Warn(logCtx, "PreFetch failed, falling back to per-blob fetching",
+			slog.String("checkpoint_id", checkpointID.String()),
+			slog.String("error", pfErr.Error()),
+		)
+	} else if prefetched > 0 {
+		logging.Debug(logCtx, "PreFetch completed",
+			slog.String("checkpoint_id", checkpointID.String()),
+			slog.Int("blobs_fetched", prefetched),
+		)
+	}
+
 	// Read metadata from checkpoint subtree (paths are relative to checkpoint root)
 	metadata, err := strategy.ReadCheckpointMetadataFromSubtree(ft, checkpointID.Path())
 	if err != nil {
@@ -286,6 +300,13 @@ func resolveLatestCheckpoint(ctx context.Context, checkpointIDs []id.CheckpointI
 			continue
 		}
 		ft := checkpoint.NewFetchingTree(ctx, cpSubtree, freshRepo.Storer, FetchBlobsByHash)
+		// Batch-prefetch blobs for this checkpoint subtree.
+		if _, pfErr := ft.PreFetch(); pfErr != nil {
+			logging.Debug(ctx, "resolveLatestCheckpoint: PreFetch failed",
+				slog.String("checkpoint_id", cpID.String()),
+				slog.String("error", pfErr.Error()),
+			)
+		}
 		metadata, metaErr := strategy.ReadCheckpointMetadataFromSubtree(ft, cpID.Path())
 		if metaErr != nil {
 			logging.Debug(ctx, "resolveLatestCheckpoint: checkpoint metadata read failed",
@@ -591,6 +612,13 @@ func checkRemoteMetadata(ctx context.Context, checkpointID id.CheckpointID) erro
 		return nil //nolint:nilerr // Informational message, not a fatal error
 	}
 	ft := checkpoint.NewFetchingTree(ctx, cpSubtree, repo.Storer, FetchBlobsByHash)
+	// Batch-prefetch blobs for the remote checkpoint subtree.
+	if _, pfErr := ft.PreFetch(); pfErr != nil {
+		logging.Debug(ctx, "checkRemoteMetadata: PreFetch failed",
+			slog.String("checkpoint_id", checkpointID.String()),
+			slog.String("error", pfErr.Error()),
+		)
+	}
 	metadata, err := strategy.ReadCheckpointMetadataFromSubtree(ft, checkpointID.Path())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Checkpoint '%s' found in commit but its metadata could not be read from entire/checkpoints/v1.\n", checkpointID)

@@ -27,11 +27,15 @@ type BlobFetchFunc func(ctx context.Context, hashes []plumbing.Hash) error
 // it, blobs fetched by external git commands (e.g. git fetch-pack) may not be
 // visible to go-git's storer. As a fallback, File() reads the blob via
 // "git cat-file" which always sees the current on-disk object store.
+//
+// For best performance, call PreFetch before reading files. PreFetch walks
+// the tree, identifies locally-missing blobs, and batch-fetches them in a
+// single network round-trip instead of one fetch per File() miss.
 type FetchingTree struct {
-	inner    *object.Tree
-	ctx      context.Context
-	resolver *BlobResolver
-	fetch    BlobFetchFunc
+	inner  *object.Tree
+	ctx    context.Context
+	storer storer.EncodedObjectStorer
+	fetch  BlobFetchFunc
 }
 
 // NewFetchingTree wraps a git tree with on-demand blob fetching.
@@ -40,10 +44,10 @@ type FetchingTree struct {
 // identically to the underlying tree.
 func NewFetchingTree(ctx context.Context, tree *object.Tree, s storer.EncodedObjectStorer, fetch BlobFetchFunc) *FetchingTree {
 	return &FetchingTree{
-		inner:    tree,
-		ctx:      ctx,
-		resolver: NewBlobResolver(s),
-		fetch:    fetch,
+		inner:  tree,
+		ctx:    ctx,
+		storer: s,
+		fetch:  fetch,
 	}
 }
 
@@ -104,6 +108,52 @@ func (t *FetchingTree) File(path string) (*object.File, error) {
 	return t.readFileViaGit(path, entry)
 }
 
+// PreFetch walks the tree recursively, identifies blob entries that are missing
+// from the local object store, and batch-fetches them in a single call to
+// t.fetch. This avoids per-blob network round-trips during subsequent File()
+// calls. It is safe to call even when all blobs are already local (no-op).
+// Returns the number of blobs fetched.
+func (t *FetchingTree) PreFetch() (int, error) {
+	if t.fetch == nil || t.storer == nil {
+		return 0, nil
+	}
+
+	missing := t.collectMissingBlobs(t.inner)
+	if len(missing) == 0 {
+		return 0, nil
+	}
+
+	logging.Debug(t.ctx, "FetchingTree.PreFetch: batch-fetching missing blobs",
+		slog.Int("count", len(missing)),
+	)
+
+	if err := t.fetch(t.ctx, missing); err != nil {
+		return 0, fmt.Errorf("prefetch %d blobs: %w", len(missing), err)
+	}
+
+	return len(missing), nil
+}
+
+// collectMissingBlobs recursively walks a tree and returns hashes of blob
+// entries that are not present in the local object store.
+func (t *FetchingTree) collectMissingBlobs(tree *object.Tree) []plumbing.Hash {
+	var missing []plumbing.Hash
+	for _, entry := range tree.Entries {
+		if entry.Mode.IsFile() {
+			if t.storer.HasEncodedObject(entry.Hash) != nil {
+				missing = append(missing, entry.Hash)
+			}
+		} else {
+			// Recurse into subtrees (tree objects are local after treeless fetch).
+			subtree, err := tree.Tree(entry.Name)
+			if err == nil {
+				missing = append(missing, t.collectMissingBlobs(subtree)...)
+			}
+		}
+	}
+	return missing
+}
+
 // readFileViaGit reads a blob via "git cat-file -p <hash>" and returns an
 // in-memory *object.File. This bypasses go-git's storer which may have a
 // stale packfile index after external git commands fetched new objects.
@@ -156,10 +206,10 @@ func (t *FetchingTree) Tree(path string) (*FetchingTree, error) {
 		return nil, fmt.Errorf("tree %s: %w", path, err)
 	}
 	return &FetchingTree{
-		inner:    subtree,
-		ctx:      t.ctx,
-		resolver: t.resolver,
-		fetch:    t.fetch,
+		inner:  subtree,
+		ctx:    t.ctx,
+		storer: t.storer,
+		fetch:  t.fetch,
 	}, nil
 }
 
