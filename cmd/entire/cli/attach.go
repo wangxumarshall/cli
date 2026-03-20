@@ -190,7 +190,7 @@ func resolveAgentAndTranscript(ctx context.Context, w io.Writer, sessionID strin
 	if err != nil {
 		detectedAg, detectedPath, detectErr := detectAgentByTranscript(ctx, sessionID, agentName)
 		if detectErr != nil {
-			return nil, "", err
+			return nil, "", fmt.Errorf("%w (also tried auto-detecting other agents: %w)", err, detectErr)
 		}
 		ag = detectedAg
 		transcriptPath = detectedPath
