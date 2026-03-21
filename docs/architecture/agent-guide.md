@@ -620,8 +620,8 @@ Claude Code, Gemini CLI, Cursor, Factory AI Droid, and Copilot CLI use a JSON se
 Key principles:
 - **Preserve unknown fields** - don't destroy user's custom hooks or settings
 - **Idempotent installs** - running `entire enable` twice doesn't duplicate hooks
-- **Support `localDev` mode** - use `go run $(git rev-parse --show-toplevel)/...` for development (only Claude Code provides a `PROJECT_DIR` env var; other agents use `git rev-parse` to resolve the repo root at runtime)
-- **Identify Entire hooks** by command prefix (e.g., `"entire "` or `"go run $(git rev-parse ..."`)
+- **Support `localDev` mode** - use `go run "$(git rev-parse --show-toplevel)"/...` for development (only Claude Code provides a `PROJECT_DIR` env var; other agents use `git rev-parse` to resolve the repo root at runtime)
+- **Identify Entire hooks** by command prefix (e.g., `"entire "` or `go run "$(git rev-parse --show-toplevel)"/...`)
 
 ### Example: Claude Code Hook Config
 
