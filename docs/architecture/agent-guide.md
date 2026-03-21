@@ -391,7 +391,7 @@ func (a *YourAgent) InstallHooks(localDev bool, force bool) (int, error) {
     // Other agents should use the git rev-parse approach instead.
     var cmdPrefix string
     if localDev {
-        cmdPrefix = "go run $(git rev-parse --show-toplevel)/cmd/entire/main.go hooks your-agent "
+        cmdPrefix = `go run "$(git rev-parse --show-toplevel)"/cmd/entire/main.go hooks your-agent `
     } else {
         cmdPrefix = "entire hooks your-agent "
     }

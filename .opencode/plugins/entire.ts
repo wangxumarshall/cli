@@ -5,7 +5,7 @@
 import type { Plugin } from "@opencode-ai/plugin"
 
 export const EntirePlugin: Plugin = async ({ directory }) => {
-  const ENTIRE_CMD = "go run $(git rev-parse --show-toplevel)/cmd/entire/main.go"
+  const ENTIRE_CMD = 'go run "$(git rev-parse --show-toplevel)"/cmd/entire/main.go'
   // Track seen user messages to fire turn-start only once per message
   const seenUserMessages = new Set<string>()
   // Track current session ID for message events (which don't include sessionID)
