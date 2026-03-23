@@ -203,7 +203,7 @@ func TestV2GitStore_WriteCommittedMain_WritesMetadata(t *testing.T) {
 	ctx := context.Background()
 
 	cpID := id.MustCheckpointID("a1b2c3d4e5f6")
-	err := store.writeCommittedMain(ctx, WriteCommittedOptions{
+	_, err := store.writeCommittedMain(ctx, WriteCommittedOptions{
 		CheckpointID: cpID,
 		SessionID:    "test-session-001",
 		Strategy:     "manual-commit",
@@ -241,7 +241,7 @@ func TestV2GitStore_WriteCommittedMain_WritesPromptsAndContentHash(t *testing.T)
 	ctx := context.Background()
 
 	cpID := id.MustCheckpointID("b2c3d4e5f6a1")
-	err := store.writeCommittedMain(ctx, WriteCommittedOptions{
+	_, err := store.writeCommittedMain(ctx, WriteCommittedOptions{
 		CheckpointID: cpID,
 		SessionID:    "test-session-002",
 		Strategy:     "manual-commit",
@@ -272,7 +272,7 @@ func TestV2GitStore_WriteCommittedMain_ExcludesTranscript(t *testing.T) {
 	ctx := context.Background()
 
 	cpID := id.MustCheckpointID("c3d4e5f6a1b2")
-	err := store.writeCommittedMain(ctx, WriteCommittedOptions{
+	_, err := store.writeCommittedMain(ctx, WriteCommittedOptions{
 		CheckpointID: cpID,
 		SessionID:    "test-session-003",
 		Strategy:     "manual-commit",
@@ -308,7 +308,7 @@ func TestV2GitStore_WriteCommittedMain_NoTranscript_SkipsContentHash(t *testing.
 	ctx := context.Background()
 
 	cpID := id.MustCheckpointID("d4e5f6a1b2c3")
-	err := store.writeCommittedMain(ctx, WriteCommittedOptions{
+	_, err := store.writeCommittedMain(ctx, WriteCommittedOptions{
 		CheckpointID: cpID,
 		SessionID:    "test-session-004",
 		Strategy:     "manual-commit",
@@ -339,7 +339,7 @@ func TestV2GitStore_WriteCommittedMain_MultiSession(t *testing.T) {
 	cpID := id.MustCheckpointID("e5f6a1b2c3d4")
 
 	// First session
-	err := store.writeCommittedMain(ctx, WriteCommittedOptions{
+	_, err := store.writeCommittedMain(ctx, WriteCommittedOptions{
 		CheckpointID:     cpID,
 		SessionID:        "session-A",
 		Strategy:         "manual-commit",
@@ -351,7 +351,7 @@ func TestV2GitStore_WriteCommittedMain_MultiSession(t *testing.T) {
 	require.NoError(t, err)
 
 	// Second session (different session ID, same checkpoint)
-	err = store.writeCommittedMain(ctx, WriteCommittedOptions{
+	_, err = store.writeCommittedMain(ctx, WriteCommittedOptions{
 		CheckpointID:     cpID,
 		SessionID:        "session-B",
 		Strategy:         "manual-commit",
@@ -523,4 +523,116 @@ func TestV2GitStore_WriteCommittedFullTranscript_ReplacesOnNewCheckpoint(t *test
 	// Checkpoint A should NOT be present — replaced by B
 	_, err = tree.Tree(cpA.Path())
 	assert.Error(t, err, "checkpoint A should not exist after checkpoint B replaced it")
+}
+
+func TestV2GitStore_WriteCommitted_WritesBothRefs(t *testing.T) {
+	t.Parallel()
+	repo := initTestRepo(t)
+	store := NewV2GitStore(repo)
+	ctx := context.Background()
+
+	cpID := id.MustCheckpointID("aa11bb22cc33")
+	err := store.WriteCommitted(ctx, WriteCommittedOptions{
+		CheckpointID: cpID,
+		SessionID:    "test-session-both",
+		Strategy:     "manual-commit",
+		Agent:        agent.AgentTypeClaudeCode,
+		Transcript:   []byte(`{"type":"assistant","message":"hello"}`),
+		Prompts:      []string{"hi there"},
+		AuthorName:   "Test",
+		AuthorEmail:  "test@test.com",
+	})
+	require.NoError(t, err)
+
+	cpPath := cpID.Path()
+
+	// /main ref should have metadata, prompt, content hash — no transcript
+	mainTree := v2MainTree(t, repo)
+	_ = v2ReadFile(t, mainTree, cpPath+"/"+paths.MetadataFileName)
+	_ = v2ReadFile(t, mainTree, cpPath+"/0/"+paths.MetadataFileName)
+	_ = v2ReadFile(t, mainTree, cpPath+"/0/"+paths.PromptFileName)
+	_ = v2ReadFile(t, mainTree, cpPath+"/0/"+paths.ContentHashFileName)
+
+	mainSessionTree, err := mainTree.Tree(cpPath + "/0")
+	require.NoError(t, err)
+	for _, entry := range mainSessionTree.Entries {
+		assert.NotEqual(t, paths.TranscriptFileName, entry.Name)
+	}
+
+	// /full/current ref should have transcript only
+	fullTree := v2FullTree(t, repo)
+	content := v2ReadFile(t, fullTree, cpPath+"/0/"+paths.TranscriptFileName)
+	assert.Contains(t, content, `"type":"assistant"`)
+}
+
+func TestV2GitStore_WriteCommitted_NoTranscript_OnlyWritesMain(t *testing.T) {
+	t.Parallel()
+	repo := initTestRepo(t)
+	store := NewV2GitStore(repo)
+	ctx := context.Background()
+
+	cpID := id.MustCheckpointID("bb22cc33dd44")
+	err := store.WriteCommitted(ctx, WriteCommittedOptions{
+		CheckpointID: cpID,
+		SessionID:    "test-session-notx",
+		Strategy:     "manual-commit",
+		AuthorName:   "Test",
+		AuthorEmail:  "test@test.com",
+	})
+	require.NoError(t, err)
+
+	// /main should have metadata
+	mainTree := v2MainTree(t, repo)
+	_ = v2ReadFile(t, mainTree, cpID.Path()+"/0/"+paths.MetadataFileName)
+
+	// /full/current ref should not exist (no transcript = no-op for full)
+	_, err = repo.Reference(plumbing.ReferenceName(paths.V2FullCurrentRefName), true)
+	assert.Error(t, err, "/full/current should not exist when no transcript is written")
+}
+
+func TestV2GitStore_WriteCommitted_MultiSession_ConsistentIndex(t *testing.T) {
+	t.Parallel()
+	repo := initTestRepo(t)
+	store := NewV2GitStore(repo)
+	ctx := context.Background()
+
+	cpID := id.MustCheckpointID("cc33dd44ee55")
+
+	// First session
+	err := store.WriteCommitted(ctx, WriteCommittedOptions{
+		CheckpointID:     cpID,
+		SessionID:        "session-X",
+		Strategy:         "manual-commit",
+		Transcript:       []byte(`{"from":"X"}`),
+		CheckpointsCount: 2,
+		AuthorName:       "Test",
+		AuthorEmail:      "test@test.com",
+	})
+	require.NoError(t, err)
+
+	// Second session — same checkpoint, different session ID
+	err = store.WriteCommitted(ctx, WriteCommittedOptions{
+		CheckpointID:     cpID,
+		SessionID:        "session-Y",
+		Strategy:         "manual-commit",
+		Transcript:       []byte(`{"from":"Y"}`),
+		CheckpointsCount: 3,
+		AuthorName:       "Test",
+		AuthorEmail:      "test@test.com",
+	})
+	require.NoError(t, err)
+
+	cpPath := cpID.Path()
+
+	// /main should have both sessions
+	mainTree := v2MainTree(t, repo)
+	summaryContent := v2ReadFile(t, mainTree, cpPath+"/"+paths.MetadataFileName)
+	var summary CheckpointSummary
+	require.NoError(t, json.Unmarshal([]byte(summaryContent), &summary))
+	assert.Len(t, summary.Sessions, 2)
+
+	// /full/current should have session Y (latest write replaces)
+	fullTree := v2FullTree(t, repo)
+	contentY := v2ReadFile(t, fullTree, cpPath+"/1/"+paths.TranscriptFileName)
+	assert.Contains(t, contentY, `"from":"Y"`)
 }

@@ -22,22 +22,43 @@ import (
 	"github.com/go-git/go-git/v6/plumbing/object"
 )
 
+// WriteCommitted writes a committed checkpoint to both v2 refs:
+//   - /main: metadata, prompts, content hash (no raw transcript)
+//   - /full/current: raw transcript only (replaces previous content)
+//
+// This is the public entry point for v2 dual-writes. The session index is
+// determined from the /main ref and passed to the /full/current write to
+// keep both refs consistent.
+func (s *V2GitStore) WriteCommitted(ctx context.Context, opts WriteCommittedOptions) error {
+	sessionIndex, err := s.writeCommittedMain(ctx, opts)
+	if err != nil {
+		return fmt.Errorf("v2 /main write failed: %w", err)
+	}
+
+	if err := s.writeCommittedFullTranscript(ctx, opts, sessionIndex); err != nil {
+		return fmt.Errorf("v2 /full/current write failed: %w", err)
+	}
+
+	return nil
+}
+
 // writeCommittedMain writes metadata entries to the /main ref.
 // This includes session metadata, prompts, and content hash — but NOT the
 // raw transcript (full.jsonl), which goes to /full/current.
-func (s *V2GitStore) writeCommittedMain(ctx context.Context, opts WriteCommittedOptions) error {
+// Returns the session index used, so the caller can pass it to writeCommittedFullTranscript.
+func (s *V2GitStore) writeCommittedMain(ctx context.Context, opts WriteCommittedOptions) (int, error) {
 	if err := validateWriteOpts(opts); err != nil {
-		return err
+		return 0, err
 	}
 
 	refName := plumbing.ReferenceName(paths.V2MainRefName)
 	if err := s.ensureRef(refName); err != nil {
-		return fmt.Errorf("failed to ensure /main ref: %w", err)
+		return 0, fmt.Errorf("failed to ensure /main ref: %w", err)
 	}
 
 	parentHash, rootTreeHash, err := s.getRefState(refName)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	basePath := opts.CheckpointID.Path() + "/"
@@ -46,27 +67,32 @@ func (s *V2GitStore) writeCommittedMain(ctx context.Context, opts WriteCommitted
 	// Read existing entries at this checkpoint's shard path
 	entries, err := s.gs.flattenCheckpointEntries(rootTreeHash, checkpointPath)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	// Build main session entries (metadata, prompts, content hash — no transcript)
-	if err := s.writeMainCheckpointEntries(ctx, opts, basePath, entries); err != nil {
-		return err
+	sessionIndex, err := s.writeMainCheckpointEntries(ctx, opts, basePath, entries)
+	if err != nil {
+		return 0, err
 	}
 
 	// Splice entries into root tree
 	newTreeHash, err := s.gs.spliceCheckpointSubtree(rootTreeHash, opts.CheckpointID, basePath, entries)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	commitMsg := fmt.Sprintf("Checkpoint: %s\n", opts.CheckpointID)
-	return s.updateRef(refName, newTreeHash, parentHash, commitMsg, opts.AuthorName, opts.AuthorEmail)
+	if err := s.updateRef(refName, newTreeHash, parentHash, commitMsg, opts.AuthorName, opts.AuthorEmail); err != nil {
+		return 0, err
+	}
+	return sessionIndex, nil
 }
 
 // writeMainCheckpointEntries orchestrates writing session data to the /main ref.
 // It mirrors GitStore.writeStandardCheckpointEntries but excludes raw transcript blobs.
-func (s *V2GitStore) writeMainCheckpointEntries(ctx context.Context, opts WriteCommittedOptions, basePath string, entries map[string]object.TreeEntry) error {
+// Returns the session index used, for coordination with writeCommittedFullTranscript.
+func (s *V2GitStore) writeMainCheckpointEntries(ctx context.Context, opts WriteCommittedOptions, basePath string, entries map[string]object.TreeEntry) (int, error) {
 	// Read existing summary to get current session count
 	var existingSummary *CheckpointSummary
 	metadataPath := basePath + paths.MetadataFileName
@@ -84,7 +110,7 @@ func (s *V2GitStore) writeMainCheckpointEntries(ctx context.Context, opts WriteC
 	sessionPath := fmt.Sprintf("%s%d/", basePath, sessionIndex)
 	sessionFilePaths, err := s.writeMainSessionToSubdirectory(opts, sessionPath, entries)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	// Build the sessions array
@@ -98,7 +124,10 @@ func (s *V2GitStore) writeMainCheckpointEntries(ctx context.Context, opts WriteC
 	sessions[sessionIndex] = sessionFilePaths
 
 	// Write root CheckpointSummary
-	return s.gs.writeCheckpointSummary(opts, basePath, entries, sessions)
+	if err := s.gs.writeCheckpointSummary(opts, basePath, entries, sessions); err != nil {
+		return 0, err
+	}
+	return sessionIndex, nil
 }
 
 // writeMainSessionToSubdirectory writes a single session's metadata, prompts, and
@@ -214,7 +243,7 @@ func (s *V2GitStore) writeContentHash(opts WriteCommittedOptions, sessionPath st
 // sessionIndex is the session slot (0-based), determined by the caller to stay
 // consistent with the /main ref's session numbering.
 // This is a no-op if opts.Transcript is empty (and opts.TranscriptPath is unset).
-func (s *V2GitStore) writeCommittedFullTranscript(ctx context.Context, opts WriteCommittedOptions, sessionIndex int) error { //nolint:unparam // sessionIndex will vary once WriteCommitted orchestrates both refs
+func (s *V2GitStore) writeCommittedFullTranscript(ctx context.Context, opts WriteCommittedOptions, sessionIndex int) error {
 	transcript := opts.Transcript
 	if len(transcript) == 0 && opts.TranscriptPath != "" {
 		var readErr error
