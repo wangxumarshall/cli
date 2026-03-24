@@ -419,8 +419,8 @@ func (m CommittedMetadata) GetTranscriptStart() int {
 // Used in CheckpointSummary.Sessions to map session IDs to their file locations.
 type SessionFilePaths struct {
 	Metadata    string `json:"metadata"`
-	Transcript  string `json:"transcript,omitempty"`
-	ContentHash string `json:"content_hash,omitempty"`
+	Transcript  string `json:"transcript"`
+	ContentHash string `json:"content_hash"`
 	Prompt      string `json:"prompt"`
 }
 
