@@ -99,7 +99,9 @@ func WorktreeRoot(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("failed to get git worktree root: %w", err)
 	}
 
-	root := strings.TrimSpace(string(output))
+	// Normalize path: git on Windows returns forward-slash paths (e.g., C:/Users/...)
+	// but Go's filepath functions expect backslashes on Windows.
+	root := filepath.FromSlash(strings.TrimSpace(string(output)))
 
 	worktreeRootMu.Lock()
 	worktreeRootCache = root
