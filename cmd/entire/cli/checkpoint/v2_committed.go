@@ -144,23 +144,36 @@ func (s *V2GitStore) updateCommittedMain(ctx context.Context, opts UpdateCommitt
 	return sessionIndex, nil
 }
 
-// updateCommittedFullTranscript replaces the transcript on /full/current for a finalized checkpoint.
+// updateCommittedFullTranscript replaces the transcript for a specific checkpoint
+// on /full/current while preserving other checkpoints' transcripts in the tree.
 func (s *V2GitStore) updateCommittedFullTranscript(ctx context.Context, opts UpdateCommittedOptions, sessionIndex int) error {
 	refName := plumbing.ReferenceName(paths.V2FullCurrentRefName)
 	if err := s.ensureRef(refName); err != nil {
 		return fmt.Errorf("failed to ensure /full/current ref: %w", err)
 	}
 
-	parentHash, _, err := s.getRefState(refName)
+	parentHash, rootTreeHash, err := s.getRefState(refName)
 	if err != nil {
 		return err
 	}
 
-	// Build fresh tree with finalized transcript (replaces previous content)
 	basePath := opts.CheckpointID.Path() + "/"
+	checkpointPath := opts.CheckpointID.Path()
 	sessionPath := fmt.Sprintf("%s%d/", basePath, sessionIndex)
 
-	entries := make(map[string]object.TreeEntry)
+	// Read existing entries and replace transcript for this checkpoint only
+	entries, err := s.gs.flattenCheckpointEntries(rootTreeHash, checkpointPath)
+	if err != nil {
+		return err
+	}
+
+	// Clear existing transcript entries at this session path before writing new ones
+	for key := range entries {
+		if strings.HasPrefix(key, sessionPath) {
+			delete(entries, key)
+		}
+	}
+
 	redactedTranscript, err := s.writeTranscriptBlobs(ctx, opts.Transcript, opts.Agent, sessionPath, entries)
 	if err != nil {
 		return err
@@ -170,9 +183,10 @@ func (s *V2GitStore) updateCommittedFullTranscript(ctx context.Context, opts Upd
 		return err
 	}
 
-	newTreeHash, err := BuildTreeFromEntries(s.repo, entries)
+	// Splice into existing root tree (preserves other checkpoints' transcripts)
+	newTreeHash, err := s.gs.spliceCheckpointSubtree(rootTreeHash, opts.CheckpointID, basePath, entries)
 	if err != nil {
-		return fmt.Errorf("failed to build /full/current tree: %w", err)
+		return err
 	}
 
 	authorName, authorEmail := GetGitAuthorFromRepo(s.repo)
@@ -355,9 +369,9 @@ func (s *V2GitStore) writeContentHash(redactedTranscript []byte, sessionPath str
 }
 
 // writeCommittedFullTranscript writes the raw transcript to the /full/current ref.
-// Each write replaces the entire tree — /full/current only ever contains the
-// transcript for the most recently written checkpoint. Older transcripts are
-// discarded; generation rotation (future work) will archive them before replacement.
+// Transcripts accumulate across checkpoints — each write splices into the existing
+// tree. When the ref reaches capacity, generation rotation (future work) archives
+// the current ref and starts a fresh one.
 //
 // sessionIndex is the session slot (0-based), determined by the caller to stay
 // consistent with the /main ref's session numbering.
@@ -384,29 +398,34 @@ func (s *V2GitStore) writeCommittedFullTranscript(ctx context.Context, opts Writ
 		return fmt.Errorf("failed to ensure /full/current ref: %w", err)
 	}
 
-	parentHash, _, err := s.getRefState(refName)
+	parentHash, rootTreeHash, err := s.getRefState(refName)
 	if err != nil {
 		return err
 	}
 
-	// Build a fresh tree with only this checkpoint's transcript (no accumulation).
 	basePath := opts.CheckpointID.Path() + "/"
+	checkpointPath := opts.CheckpointID.Path()
 	sessionPath := fmt.Sprintf("%s%d/", basePath, sessionIndex)
 
-	entries := make(map[string]object.TreeEntry)
+	// Read existing entries at this checkpoint's shard path (accumulate, don't replace)
+	entries, err := s.gs.flattenCheckpointEntries(rootTreeHash, checkpointPath)
+	if err != nil {
+		return err
+	}
+
 	redactedTranscript, err := s.writeTranscriptBlobs(ctx, transcript, opts.Agent, sessionPath, entries)
 	if err != nil {
 		return err
 	}
 
-	// Write content hash alongside the transcript it references
 	if err := s.writeContentHash(redactedTranscript, sessionPath, entries); err != nil {
 		return err
 	}
 
-	newTreeHash, err := BuildTreeFromEntries(s.repo, entries)
+	// Splice into existing root tree (preserves other checkpoints' transcripts)
+	newTreeHash, err := s.gs.spliceCheckpointSubtree(rootTreeHash, opts.CheckpointID, basePath, entries)
 	if err != nil {
-		return fmt.Errorf("failed to build /full/current tree: %w", err)
+		return err
 	}
 
 	commitMsg := fmt.Sprintf("Checkpoint: %s\n", opts.CheckpointID)

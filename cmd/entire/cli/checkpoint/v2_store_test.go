@@ -458,7 +458,7 @@ func TestV2GitStore_WriteCommittedFull_NoTranscript_Noop(t *testing.T) {
 	// If ref doesn't exist at all, that's also acceptable for a no-op
 }
 
-func TestV2GitStore_WriteCommittedFullTranscript_ReplacesOnNewCheckpoint(t *testing.T) {
+func TestV2GitStore_WriteCommittedFullTranscript_AccumulatesCheckpoints(t *testing.T) {
 	t.Parallel()
 	repo := initTestRepo(t)
 	store := NewV2GitStore(repo)
@@ -478,7 +478,7 @@ func TestV2GitStore_WriteCommittedFullTranscript_ReplacesOnNewCheckpoint(t *test
 	}, 0)
 	require.NoError(t, err)
 
-	// Write checkpoint B — should replace A entirely
+	// Write checkpoint B — should accumulate alongside A
 	err = store.writeCommittedFullTranscript(ctx, WriteCommittedOptions{
 		CheckpointID: cpB,
 		SessionID:    "session-B",
@@ -491,13 +491,12 @@ func TestV2GitStore_WriteCommittedFullTranscript_ReplacesOnNewCheckpoint(t *test
 
 	tree := v2FullTree(t, repo)
 
-	// Checkpoint B should be present
+	// Both checkpoints should be present
+	contentA := v2ReadFile(t, tree, cpA.Path()+"/0/"+paths.TranscriptFileName)
+	assert.Contains(t, contentA, `"from":"A"`)
+
 	contentB := v2ReadFile(t, tree, cpB.Path()+"/0/"+paths.TranscriptFileName)
 	assert.Contains(t, contentB, `"from":"B"`)
-
-	// Checkpoint A should NOT be present — replaced by B
-	_, err = tree.Tree(cpA.Path())
-	assert.Error(t, err, "checkpoint A should not exist after checkpoint B replaced it")
 }
 
 func TestV2GitStore_WriteCommitted_WritesBothRefs(t *testing.T) {
