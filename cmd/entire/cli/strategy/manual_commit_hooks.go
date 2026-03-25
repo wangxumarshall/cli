@@ -1673,7 +1673,7 @@ func (s *ManualCommitStrategy) tryAgentCommitFastPath(ctx context.Context, commi
 	for _, state := range sessions {
 		if state.Phase.IsActive() {
 			logCtx := logging.WithComponent(ctx, "checkpoint")
-			s.addTrailerForAgentCommit(logCtx, commitMsgFile, state, source)
+			_ = s.addTrailerForAgentCommit(logCtx, commitMsgFile, state, source) //nolint:errcheck // always returns nil; kept for signature stability
 			return true
 		}
 	}
@@ -1683,23 +1683,22 @@ func (s *ManualCommitStrategy) tryAgentCommitFastPath(ctx context.Context, commi
 // addTrailerForAgentCommit handles the fast path when an agent is committing
 // (ACTIVE session + no TTY). Generates a checkpoint ID and adds the trailer
 // directly, bypassing content detection and interactive prompts.
-// Silently returns on any error — hooks must be resilient.
-func (s *ManualCommitStrategy) addTrailerForAgentCommit(logCtx context.Context, commitMsgFile string, state *SessionState, source string) {
+func (s *ManualCommitStrategy) addTrailerForAgentCommit(logCtx context.Context, commitMsgFile string, state *SessionState, source string) error { //nolint:unparam // kept for signature stability
 	cpID, err := id.Generate()
 	if err != nil {
-		return
+		return nil //nolint:nilerr // Hook must be silent on failure
 	}
 
 	content, err := os.ReadFile(commitMsgFile) //nolint:gosec // commitMsgFile is provided by git hook
 	if err != nil {
-		return
+		return nil //nolint:nilerr // Hook must be silent on failure
 	}
 
 	message := string(content)
 
 	// Don't add if trailer already exists
 	if _, found := trailers.ParseCheckpoint(message); found {
-		return
+		return nil
 	}
 
 	message = addCheckpointTrailer(message, cpID)
@@ -1711,7 +1710,10 @@ func (s *ManualCommitStrategy) addTrailerForAgentCommit(logCtx context.Context, 
 		slog.String("session_id", state.SessionID),
 	)
 
-	_ = os.WriteFile(commitMsgFile, []byte(message), 0o600) //nolint:gosec,errcheck // path from git hook arg; best-effort
+	if err := os.WriteFile(commitMsgFile, []byte(message), 0o600); err != nil { //nolint:gosec // path from git hook arg
+		return nil //nolint:nilerr // Hook must be silent on failure
+	}
+	return nil
 }
 
 // addCheckpointTrailer adds the Entire-Checkpoint trailer to a commit message.
