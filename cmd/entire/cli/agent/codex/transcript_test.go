@@ -97,11 +97,11 @@ func TestCalculateTokenUsage(t *testing.T) {
 	t.Parallel()
 	ag := &CodexAgent{}
 
+	// From offset 0 (no baseline), should return full cumulative total
 	usage, err := ag.CalculateTokenUsage([]byte(sampleRollout), 0)
 	require.NoError(t, err)
 	require.NotNil(t, usage)
 
-	// Should use the last token_count entry (total_token_usage)
 	require.Equal(t, 15000, usage.InputTokens)
 	require.Equal(t, 12000, usage.CacheReadTokens)
 	require.Equal(t, 380, usage.OutputTokens) // 300 + 80 reasoning
@@ -112,14 +112,16 @@ func TestCalculateTokenUsage_WithOffset(t *testing.T) {
 	t.Parallel()
 	ag := &CodexAgent{}
 
-	// Skip past first token_count (line 4)
+	// Skip past first token_count (line 4) — baseline is {5000, 4000, 120}
+	// Last after offset is {15000, 12000, 380} → delta = {10000, 8000, 260}
 	usage, err := ag.CalculateTokenUsage([]byte(sampleRollout), 4)
 	require.NoError(t, err)
 	require.NotNil(t, usage)
 
-	// Should still see last total_token_usage
-	require.Equal(t, 15000, usage.InputTokens)
-	require.Equal(t, 2, usage.APICallCount) // only 2 token_count events after offset
+	require.Equal(t, 10000, usage.InputTokens)    // 15000 - 5000
+	require.Equal(t, 8000, usage.CacheReadTokens) // 12000 - 4000
+	require.Equal(t, 260, usage.OutputTokens)     // (300+80) - (100+20)
+	require.Equal(t, 2, usage.APICallCount)
 }
 
 func TestCalculateTokenUsage_NoData(t *testing.T) {

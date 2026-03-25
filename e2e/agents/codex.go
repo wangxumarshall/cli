@@ -71,7 +71,10 @@ func (c *Codex) RunPrompt(ctx context.Context, dir string, prompt string, opts .
 	}
 	defer cleanup()
 
-	absDir, _ := filepath.Abs(dir)
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		absDir = dir
+	}
 	if err := seedCodexHome(home, absDir); err != nil {
 		return Output{}, fmt.Errorf("seed codex home: %w", err)
 	}
@@ -127,7 +130,10 @@ func (c *Codex) StartSession(ctx context.Context, dir string) (Session, error) {
 		return nil, fmt.Errorf("create codex home: %w", err)
 	}
 
-	absDir, _ := filepath.Abs(dir)
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		absDir = dir
+	}
 	if err := seedCodexHome(home, absDir); err != nil {
 		cleanup()
 		return nil, fmt.Errorf("seed codex home: %w", err)
@@ -135,6 +141,9 @@ func (c *Codex) StartSession(ctx context.Context, dir string) (Session, error) {
 
 	s, err := NewTmuxSession(name, dir, []string{"CODEX_HOME", "ENTIRE_TEST_TTY"}, "env",
 		"CODEX_HOME="+home,
+		"OPENAI_API_KEY="+os.Getenv("OPENAI_API_KEY"),
+		"HOME="+os.Getenv("HOME"),
+		"TERM="+os.Getenv("TERM"),
 		"codex", "--dangerously-bypass-approvals-and-sandbox",
 	)
 	if err != nil {
@@ -169,8 +178,12 @@ func seedCodexHome(home, projectDir string) error {
 		return err
 	}
 
-	// Write config with trust, feature flag, and pinned model to skip upgrade dialogs
-	config := fmt.Sprintf("model = \"gpt-5.4\"\n\n[features]\ncodex_hooks = true\n\n[projects.%q]\ntrust_level = \"trusted\"\n", projectDir)
+	// Write config with trust, feature flag, and pinned model to skip upgrade dialogs.
+	model := os.Getenv("E2E_CODEX_MODEL")
+	if model == "" {
+		model = "gpt-5.4"
+	}
+	config := fmt.Sprintf("model = %q\n\n[features]\ncodex_hooks = true\n\n[projects.%q]\ntrust_level = \"trusted\"\n", model, projectDir)
 	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0o600); err != nil {
 		return err
 	}

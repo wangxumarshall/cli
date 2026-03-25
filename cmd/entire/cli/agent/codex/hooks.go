@@ -91,6 +91,14 @@ func (c *CodexAgent) InstallHooks(ctx context.Context, localDev bool, force bool
 	}
 
 	if count == 0 {
+		// Still ensure feature flag and trust are configured even if hooks
+		// were already present (e.g., manually installed).
+		if err := ensureProjectFeatureEnabled(repoRoot); err != nil {
+			return 0, fmt.Errorf("failed to enable codex_hooks feature: %w", err)
+		}
+		if err := ensureProjectTrusted(repoRoot); err != nil {
+			return 0, fmt.Errorf("failed to trust project: %w", err)
+		}
 		return 0, nil
 	}
 
@@ -99,8 +107,12 @@ func (c *CodexAgent) InstallHooks(ctx context.Context, localDev bool, force bool
 	marshalHookType(rawHooks, "UserPromptSubmit", userPromptSubmit)
 	marshalHookType(rawHooks, "Stop", stop)
 
-	// Build the top-level structure
-	topLevel := map[string]json.RawMessage{}
+	// Preserve existing top-level keys (e.g., $schema) by reusing the parsed file
+	topLevel := make(map[string]json.RawMessage)
+	if readErr == nil {
+		// Re-parse the original file to preserve all top-level keys
+		_ = json.Unmarshal(existingData, &topLevel) //nolint:errcheck // best-effort preservation
+	}
 	hooksJSON, err := json.Marshal(rawHooks)
 	if err != nil {
 		return 0, fmt.Errorf("failed to marshal hooks: %w", err)
@@ -216,8 +228,15 @@ func (c *CodexAgent) AreHooksInstalled(ctx context.Context) bool {
 		return false
 	}
 
-	return hookCommandExists(hooksFile.Hooks.Stop, "entire hooks codex stop") ||
-		hookCommandExists(hooksFile.Hooks.Stop, "go run ${CLAUDE_PROJECT_DIR}/cmd/entire/main.go hooks codex stop")
+	// Check for both production and localDev hook formats
+	for _, group := range hooksFile.Hooks.Stop {
+		for _, hook := range group.Hooks {
+			if isEntireHook(hook.Command) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // --- Helpers ---

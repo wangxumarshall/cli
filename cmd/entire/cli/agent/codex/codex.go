@@ -78,12 +78,15 @@ func (c *CodexAgent) GetSessionDir(_ string) (string, error) {
 }
 
 // ResolveSessionFile returns the path to a Codex session transcript file.
-// Codex provides the transcript path directly in hook payloads, so we return
-// the sessionRef directly (it's an absolute path to the rollout JSONL file).
-func (c *CodexAgent) ResolveSessionFile(_, agentSessionID string) string {
-	// In practice, SessionRef from hooks is the full path to the rollout file.
-	// If we only have a session ID, we can't resolve the rollout file path
-	// because Codex uses a sharded directory layout with timestamps.
+// Codex provides the transcript path directly in hook payloads as an absolute path.
+// When only a session ID is available, we construct a best-effort path.
+func (c *CodexAgent) ResolveSessionFile(sessionDir, agentSessionID string) string {
+	if filepath.IsAbs(agentSessionID) {
+		return agentSessionID
+	}
+	if sessionDir != "" {
+		return filepath.Join(sessionDir, agentSessionID+".jsonl")
+	}
 	return agentSessionID
 }
 
@@ -101,10 +104,16 @@ func (c *CodexAgent) ReadSession(input *agent.HookInput) (*agent.AgentSession, e
 		return nil, fmt.Errorf("failed to read transcript: %w", err)
 	}
 
-	// Extract modified files from the rollout transcript (best-effort).
+	// Extract modified files from the rollout transcript (best-effort, deduplicated).
 	var modifiedFiles []string
+	seen := make(map[string]struct{})
 	for _, lineData := range splitJSONL(data) {
-		modifiedFiles = append(modifiedFiles, extractFilesFromLine(lineData)...)
+		for _, f := range extractFilesFromLine(lineData) {
+			if _, exists := seen[f]; !exists {
+				seen[f] = struct{}{}
+				modifiedFiles = append(modifiedFiles, f)
+			}
+		}
 	}
 
 	return &agent.AgentSession{

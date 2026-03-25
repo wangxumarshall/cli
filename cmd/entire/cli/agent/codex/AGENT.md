@@ -8,7 +8,7 @@ Codex (OpenAI's CLI coding agent) supports lifecycle hooks via `hooks.json` conf
 
 | Check | Result | Notes |
 |-------|--------|-------|
-| Binary present | PASS | `/Users/soph/.local/share/mise/installs/node/23.8.0/bin/codex` |
+| Binary present | PASS | `codex` found on PATH |
 | Help available | PASS | `codex --help` shows full subcommand list |
 | Version info | PASS | `codex-cli 0.116.0` |
 | Hook keywords | PASS | Hook system via `hooks.json` config files |
@@ -202,5 +202,5 @@ The `systemMessage` field can be used to display messages to the user via the ag
 
 ## Captured Payloads
 
-- JSON schemas at `/Users/soph/Work/entire/research/codex/codex-rs/hooks/schema/generated/`
-- Hook config structure at `/Users/soph/Work/entire/research/codex/codex-rs/hooks/src/engine/config.rs`
+- JSON schemas at `codex-rs/hooks/schema/generated/` in the Codex repository
+- Hook config structure at `codex-rs/hooks/src/engine/config.rs` in the Codex repository

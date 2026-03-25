@@ -184,37 +184,41 @@ func extractFilesFromApplyPatch(input string) []string {
 }
 
 // CalculateTokenUsage computes token usage from the transcript starting at the given line offset.
+// Codex reports cumulative total_token_usage, so we compute the delta between the last
+// token_count at/before the offset and the last token_count after the offset.
 func (c *CodexAgent) CalculateTokenUsage(transcriptData []byte, fromOffset int) (*agent.TokenUsage, error) {
-	var lastUsage *tokenUsageData
+	var baselineUsage *tokenUsageData // last token_count at or before offset
+	var lastUsage *tokenUsageData     // last token_count after offset
 	apiCalls := 0
 	lineNum := 0
 
 	for _, lineData := range splitJSONL(transcriptData) {
 		lineNum++
-		if lineNum <= fromOffset {
-			continue
-		}
 
 		var line rolloutLine
 		if json.Unmarshal(lineData, &line) != nil {
 			continue
 		}
-
 		if line.Type != "event_msg" {
 			continue
 		}
-
 		var evt eventMsgPayload
 		if json.Unmarshal(line.Payload, &evt) != nil {
 			continue
 		}
+		if evt.Type != "token_count" || len(evt.Info) == 0 {
+			continue
+		}
+		var info tokenCountInfo
+		if json.Unmarshal(evt.Info, &info) != nil || info.TotalTokenUsage == nil {
+			continue
+		}
 
-		if evt.Type == "token_count" && len(evt.Info) > 0 {
-			var info tokenCountInfo
-			if json.Unmarshal(evt.Info, &info) == nil && info.TotalTokenUsage != nil {
-				lastUsage = info.TotalTokenUsage
-				apiCalls++
-			}
+		if lineNum <= fromOffset {
+			baselineUsage = info.TotalTokenUsage
+		} else {
+			lastUsage = info.TotalTokenUsage
+			apiCalls++
 		}
 	}
 
@@ -222,13 +226,20 @@ func (c *CodexAgent) CalculateTokenUsage(transcriptData []byte, fromOffset int) 
 		return nil, nil //nolint:nilnil // no usage data found
 	}
 
-	return &agent.TokenUsage{
-		InputTokens:         lastUsage.InputTokens,
-		CacheReadTokens:     lastUsage.CachedInputTokens,
-		OutputTokens:        lastUsage.OutputTokens + lastUsage.ReasoningOutputTokens,
-		CacheCreationTokens: 0, // Codex doesn't report cache creation separately
-		APICallCount:        apiCalls,
-	}, nil
+	// Subtract baseline to get the delta for this checkpoint range
+	result := &agent.TokenUsage{
+		InputTokens:     lastUsage.InputTokens,
+		CacheReadTokens: lastUsage.CachedInputTokens,
+		OutputTokens:    lastUsage.OutputTokens + lastUsage.ReasoningOutputTokens,
+		APICallCount:    apiCalls,
+	}
+	if baselineUsage != nil {
+		result.InputTokens -= baselineUsage.InputTokens
+		result.CacheReadTokens -= baselineUsage.CachedInputTokens
+		result.OutputTokens -= baselineUsage.OutputTokens + baselineUsage.ReasoningOutputTokens
+	}
+
+	return result, nil
 }
 
 // ExtractPrompts returns user prompts from the transcript starting at the given offset.
