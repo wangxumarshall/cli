@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -368,17 +369,9 @@ func (s *ManualCommitStrategy) PrepareCommitMsg(ctx context.Context, commitMsgFi
 	}
 	findSessionsSpan.End()
 
-	// Fast path: when an agent is committing (ACTIVE session + no TTY), skip
-	// content detection and interactive prompts. The agent can't respond to TTY
-	// prompts and the content detection can miss mid-session work (no shadow
-	// branch yet, transcript analysis may fail). Generate a checkpoint ID and
-	// add the trailer directly.
-	if !hasTTY() {
-		for _, state := range sessions {
-			if state.Phase.IsActive() {
-				return s.addTrailerForAgentCommit(logCtx, commitMsgFile, state, source)
-			}
-		}
+	// Fast path: skip content detection for mid-turn agent commits.
+	if err := s.tryAgentCommitFastPath(ctx, commitMsgFile, sessions, source); err == nil {
+		return nil
 	}
 
 	// Check if any session has new content to condense
@@ -1656,6 +1649,37 @@ func (s *ManualCommitStrategy) extractModifiedFilesFromLiveTranscript(ctx contex
 	}
 
 	return modifiedFiles
+}
+
+// tryAgentCommitFastPath skips content detection for mid-turn agent commits.
+// Returns nil if the fast path was taken (trailer added), or a non-nil error
+// to signal the caller should continue with normal content detection.
+//
+// The fast path activates when an ACTIVE session exists and either:
+//   - No TTY is available (agent subprocess, CI), or
+//   - commit_linking="always" (user opted into auto-linking — needed because
+//     some agents like Gemini subagents commit mid-turn from processes that
+//     have /dev/tty but can't respond to prompts, and content detection fails
+//     since the shadow branch doesn't exist yet).
+var errFastPathNotTaken = errors.New("fast path not taken")
+
+func (s *ManualCommitStrategy) tryAgentCommitFastPath(ctx context.Context, commitMsgFile string, sessions []*SessionState, source string) error {
+	skipContentDetection := !hasTTY()
+	if !skipContentDetection {
+		if stngs, err := settings.Load(ctx); err == nil {
+			skipContentDetection = stngs.GetCommitLinking() == settings.CommitLinkingAlways
+		}
+	}
+	if !skipContentDetection {
+		return errFastPathNotTaken
+	}
+	for _, state := range sessions {
+		if state.Phase.IsActive() {
+			logCtx := logging.WithComponent(ctx, "checkpoint")
+			return s.addTrailerForAgentCommit(logCtx, commitMsgFile, state, source)
+		}
+	}
+	return errFastPathNotTaken
 }
 
 // addTrailerForAgentCommit handles the fast path when an agent is committing
