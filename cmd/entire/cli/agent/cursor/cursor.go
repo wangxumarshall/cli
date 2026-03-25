@@ -145,11 +145,16 @@ func (c *CursorAgent) PrepareTranscript(ctx context.Context, sessionRef string) 
 
 	deadline := time.Now().Add(maxWait)
 	for time.Now().Before(deadline) {
-		if info, err := os.Stat(sessionRef); err == nil && info.Size() > 0 {
-			logging.Debug(logCtx, "transcript file ready",
-				slog.Int64("size", info.Size()),
-			)
-			return nil
+		info, err := os.Stat(sessionRef)
+		if err == nil {
+			if info.Size() > 0 {
+				logging.Debug(logCtx, "transcript file ready",
+					slog.Int64("size", info.Size()),
+				)
+				return nil
+			}
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("failed to stat transcript %q: %w", sessionRef, err)
 		}
 		time.Sleep(pollInterval)
 	}
