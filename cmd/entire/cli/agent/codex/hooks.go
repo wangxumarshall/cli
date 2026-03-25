@@ -122,10 +122,16 @@ func (c *CodexAgent) InstallHooks(ctx context.Context, localDev bool, force bool
 		return 0, fmt.Errorf("failed to write hooks.json: %w", err)
 	}
 
-	// Enable the codex_hooks feature flag in project-level config.toml.
+	// Enable the codex_hooks feature flag in the user-level ~/.codex/config.toml.
 	// This is required because codex_hooks is default_enabled: false (UnderDevelopment).
-	// Writing to .codex/config.toml (project-level) ensures it only affects this repo.
-	if err := ensureFeatureEnabled(repoRoot); err != nil {
+	//
+	// We write to the user-level config (not project-level) because:
+	// - Project-level .codex/config.toml triggers Codex's trust system
+	// - Untrusted projects have their entire config layer disabled, which also
+	//   prevents hooks.json from being discovered
+	// - The feature flag is a global toggle ("process hooks.json files"), not
+	//   per-repo behavior — it's safe to enable globally
+	if err := ensureFeatureEnabled(); err != nil {
 		return count, fmt.Errorf("failed to enable codex_hooks feature: %w", err)
 	}
 
@@ -300,11 +306,20 @@ const configFileName = "config.toml"
 const featureLine = "codex_hooks = true"
 
 // ensureFeatureEnabled ensures the codex_hooks feature flag is enabled
-// in the project-level .codex/config.toml. This is per-repo only.
-func ensureFeatureEnabled(repoRoot string) error {
-	configPath := filepath.Join(repoRoot, ".codex", configFileName)
+// in the user-level ~/.codex/config.toml.
+func ensureFeatureEnabled() error {
+	codexHome := os.Getenv("CODEX_HOME")
+	if codexHome == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("failed to get home directory: %w", err)
+		}
+		codexHome = filepath.Join(homeDir, ".codex")
+	}
 
-	data, err := os.ReadFile(configPath) //nolint:gosec // path constructed from repo root
+	configPath := filepath.Join(codexHome, configFileName)
+
+	data, err := os.ReadFile(configPath) //nolint:gosec // path in user home directory
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to read config.toml: %w", err)
 	}
@@ -328,10 +343,10 @@ func ensureFeatureEnabled(repoRoot string) error {
 		content += "\n[features]\n" + featureLine + "\n"
 	}
 
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o750); err != nil {
-		return fmt.Errorf("failed to create .codex directory: %w", err)
+	if err := os.MkdirAll(codexHome, 0o750); err != nil { //nolint:gosec // path from CODEX_HOME env or user home directory
+		return fmt.Errorf("failed to create codex home directory: %w", err)
 	}
-	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil { //nolint:gosec // path constructed from repo root
+	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil { //nolint:gosec // path in user home directory
 		return fmt.Errorf("failed to write config.toml: %w", err)
 	}
 	return nil

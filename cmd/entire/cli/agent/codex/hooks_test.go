@@ -9,16 +9,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestInstallHooks_CreatesConfig(t *testing.T) {
+// setupTestEnv creates a temp dir, sets CWD and CODEX_HOME for test isolation.
+// Cannot be parallel (uses t.Chdir and t.Setenv which are process-global).
+func setupTestEnv(t *testing.T) string {
+	t.Helper()
 	tempDir := t.TempDir()
 	t.Chdir(tempDir)
+	t.Setenv("CODEX_HOME", filepath.Join(tempDir, ".codex-home"))
+	return tempDir
+}
+
+func TestInstallHooks_CreatesConfig(t *testing.T) {
+	tempDir := setupTestEnv(t)
+	codexHome := os.Getenv("CODEX_HOME")
 
 	ag := &CodexAgent{}
 	count, err := ag.InstallHooks(context.Background(), false, false)
 	require.NoError(t, err)
 	require.Equal(t, 3, count) // SessionStart, UserPromptSubmit, Stop
 
-	// Verify hooks.json was created
+	// Verify hooks.json was created in the repo
 	hooksPath := filepath.Join(tempDir, ".codex", HooksFileName)
 	data, err := os.ReadFile(hooksPath)
 	require.NoError(t, err)
@@ -26,8 +36,8 @@ func TestInstallHooks_CreatesConfig(t *testing.T) {
 	require.Contains(t, string(data), "entire hooks codex user-prompt-submit")
 	require.Contains(t, string(data), "entire hooks codex stop")
 
-	// Verify config.toml enables codex_hooks feature
-	configPath := filepath.Join(tempDir, ".codex", configFileName)
+	// Verify config.toml enables codex_hooks feature in user-level config
+	configPath := filepath.Join(codexHome, configFileName)
 	configData, err := os.ReadFile(configPath)
 	require.NoError(t, err)
 	require.Contains(t, string(configData), "codex_hooks = true")
@@ -35,8 +45,7 @@ func TestInstallHooks_CreatesConfig(t *testing.T) {
 }
 
 func TestInstallHooks_Idempotent(t *testing.T) {
-	tempDir := t.TempDir()
-	t.Chdir(tempDir)
+	setupTestEnv(t)
 
 	ag := &CodexAgent{}
 
@@ -52,8 +61,7 @@ func TestInstallHooks_Idempotent(t *testing.T) {
 }
 
 func TestInstallHooks_LocalDev(t *testing.T) {
-	tempDir := t.TempDir()
-	t.Chdir(tempDir)
+	tempDir := setupTestEnv(t)
 
 	ag := &CodexAgent{}
 	count, err := ag.InstallHooks(context.Background(), true, false)
@@ -67,8 +75,7 @@ func TestInstallHooks_LocalDev(t *testing.T) {
 }
 
 func TestInstallHooks_Force(t *testing.T) {
-	tempDir := t.TempDir()
-	t.Chdir(tempDir)
+	setupTestEnv(t)
 
 	ag := &CodexAgent{}
 
@@ -83,8 +90,7 @@ func TestInstallHooks_Force(t *testing.T) {
 }
 
 func TestUninstallHooks(t *testing.T) {
-	tempDir := t.TempDir()
-	t.Chdir(tempDir)
+	setupTestEnv(t)
 
 	ag := &CodexAgent{}
 
@@ -101,16 +107,14 @@ func TestUninstallHooks(t *testing.T) {
 }
 
 func TestAreHooksInstalled_NoFile(t *testing.T) {
-	tempDir := t.TempDir()
-	t.Chdir(tempDir)
+	setupTestEnv(t)
 
 	ag := &CodexAgent{}
 	require.False(t, ag.AreHooksInstalled(context.Background()))
 }
 
 func TestAreHooksInstalled_WithHooks(t *testing.T) {
-	tempDir := t.TempDir()
-	t.Chdir(tempDir)
+	setupTestEnv(t)
 
 	ag := &CodexAgent{}
 	_, err := ag.InstallHooks(context.Background(), false, false)
@@ -120,8 +124,7 @@ func TestAreHooksInstalled_WithHooks(t *testing.T) {
 }
 
 func TestInstallHooks_PreservesExistingConfig(t *testing.T) {
-	tempDir := t.TempDir()
-	t.Chdir(tempDir)
+	tempDir := setupTestEnv(t)
 
 	ag := &CodexAgent{}
 
@@ -151,4 +154,24 @@ func TestInstallHooks_PreservesExistingConfig(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(data), "my-custom-hook")
 	require.Contains(t, string(data), "entire hooks codex stop")
+}
+
+func TestInstallHooks_PreservesExistingUserConfig(t *testing.T) {
+	setupTestEnv(t)
+	codexHome := os.Getenv("CODEX_HOME")
+
+	// Write existing user-level config
+	require.NoError(t, os.MkdirAll(codexHome, 0o750))
+	existingConfig := "model = \"gpt-4.1\"\n"
+	require.NoError(t, os.WriteFile(filepath.Join(codexHome, configFileName), []byte(existingConfig), 0o600))
+
+	ag := &CodexAgent{}
+	_, err := ag.InstallHooks(context.Background(), false, false)
+	require.NoError(t, err)
+
+	// Verify existing config is preserved and feature is added
+	configData, err := os.ReadFile(filepath.Join(codexHome, configFileName))
+	require.NoError(t, err)
+	require.Contains(t, string(configData), "model = \"gpt-4.1\"")
+	require.Contains(t, string(configData), "codex_hooks = true")
 }
