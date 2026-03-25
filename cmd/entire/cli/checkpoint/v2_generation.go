@@ -3,6 +3,9 @@ package checkpoint
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint/id"
@@ -158,4 +161,56 @@ func (s *V2GitStore) addGenerationToRootTree(rootTreeHash plumbing.Hash, gen Gen
 	return UpdateSubtree(s.repo, rootTreeHash, nil, []object.TreeEntry{
 		{Name: paths.GenerationFileName, Mode: filemode.Regular, Hash: blobHash},
 	}, UpdateSubtreeOptions{MergeMode: MergeKeepExisting})
+}
+
+// generationRefWidth is the zero-padded width of archived generation ref names.
+const generationRefWidth = 13
+
+// listArchivedGenerations returns the names of all archived generation refs
+// (everything under V2FullRefPrefix except "current"), sorted ascending.
+func (s *V2GitStore) listArchivedGenerations() ([]string, error) {
+	refs, err := s.repo.References()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list references: %w", err)
+	}
+
+	var archived []string
+	err = refs.ForEach(func(ref *plumbing.Reference) error {
+		name := ref.Name().String()
+		if !strings.HasPrefix(name, paths.V2FullRefPrefix) {
+			return nil
+		}
+		suffix := strings.TrimPrefix(name, paths.V2FullRefPrefix)
+		if suffix == "current" {
+			return nil
+		}
+		archived = append(archived, suffix)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to iterate references: %w", err)
+	}
+
+	sort.Strings(archived)
+	return archived, nil
+}
+
+// nextGenerationNumber returns the next sequential generation number for archiving.
+// Scans existing archived refs and returns max+1. Returns 1 if no archives exist.
+func (s *V2GitStore) nextGenerationNumber() (int, error) {
+	archived, err := s.listArchivedGenerations()
+	if err != nil {
+		return 0, err
+	}
+	if len(archived) == 0 {
+		return 1, nil
+	}
+
+	// Parse the highest archive number
+	highest := archived[len(archived)-1]
+	n, err := strconv.Atoi(strings.TrimLeft(highest, "0"))
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse archived generation number %q: %w", highest, err)
+	}
+	return n + 1, nil
 }

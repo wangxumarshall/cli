@@ -3,6 +3,7 @@ package checkpoint
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -350,4 +351,90 @@ func TestWriteCommittedFull_GenerationJSON_PreservedInTree(t *testing.T) {
 	// Verify checkpoint data is also present
 	content := v2ReadFile(t, fullTree, cpID.Path()+"/0/"+paths.TranscriptFileName)
 	assert.Contains(t, content, `"check":"tree"`)
+}
+
+// createArchivedRef creates a dummy archived generation ref for testing.
+func createArchivedRef(t *testing.T, repo *git.Repository, number int) {
+	t.Helper()
+	store := NewV2GitStore(repo)
+
+	// Build a minimal tree with just generation.json
+	gen := GenerationMetadata{
+		Generation:      number,
+		CheckpointCount: 1,
+		Checkpoints:     []string{"dummy000000"},
+	}
+	entries := make(map[string]object.TreeEntry)
+	require.NoError(t, store.writeGeneration(gen, entries))
+	treeHash, err := BuildTreeFromEntries(repo, entries)
+	require.NoError(t, err)
+
+	authorName, authorEmail := GetGitAuthorFromRepo(repo)
+	commitHash, err := CreateCommit(repo, treeHash, plumbing.ZeroHash, "archived", authorName, authorEmail)
+	require.NoError(t, err)
+
+	refName := plumbing.ReferenceName(fmt.Sprintf("%s%013d", paths.V2FullRefPrefix, number))
+	require.NoError(t, repo.Storer.SetReference(plumbing.NewHashReference(refName, commitHash)))
+}
+
+func TestListArchivedGenerations_Empty(t *testing.T) {
+	t.Parallel()
+	repo := initTestRepo(t)
+	store := NewV2GitStore(repo)
+
+	archived, err := store.listArchivedGenerations()
+	require.NoError(t, err)
+	assert.Empty(t, archived)
+}
+
+func TestListArchivedGenerations_FindsArchived(t *testing.T) {
+	t.Parallel()
+	repo := initTestRepo(t)
+	store := NewV2GitStore(repo)
+
+	createArchivedRef(t, repo, 1)
+	createArchivedRef(t, repo, 2)
+
+	archived, err := store.listArchivedGenerations()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"0000000000001", "0000000000002"}, archived)
+}
+
+func TestListArchivedGenerations_ExcludesCurrent(t *testing.T) {
+	t.Parallel()
+	repo := initTestRepo(t)
+	store := NewV2GitStore(repo)
+
+	// Create /full/current ref
+	require.NoError(t, store.ensureRef(plumbing.ReferenceName(paths.V2FullCurrentRefName)))
+
+	// Create an archived ref
+	createArchivedRef(t, repo, 1)
+
+	archived, err := store.listArchivedGenerations()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"0000000000001"}, archived)
+}
+
+func TestNextGenerationNumber_NoArchives(t *testing.T) {
+	t.Parallel()
+	repo := initTestRepo(t)
+	store := NewV2GitStore(repo)
+
+	next, err := store.nextGenerationNumber()
+	require.NoError(t, err)
+	assert.Equal(t, 1, next)
+}
+
+func TestNextGenerationNumber_WithExisting(t *testing.T) {
+	t.Parallel()
+	repo := initTestRepo(t)
+	store := NewV2GitStore(repo)
+
+	createArchivedRef(t, repo, 1)
+	createArchivedRef(t, repo, 2)
+
+	next, err := store.nextGenerationNumber()
+	require.NoError(t, err)
+	assert.Equal(t, 3, next)
 }
