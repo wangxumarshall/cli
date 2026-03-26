@@ -17,6 +17,7 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint/id"
 	"github.com/entireio/cli/cmd/entire/cli/osroot"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
+	"github.com/entireio/cli/cmd/entire/cli/settings"
 	"github.com/entireio/cli/cmd/entire/cli/trailers"
 
 	"github.com/charmbracelet/huh"
@@ -621,16 +622,26 @@ func (s *ManualCommitStrategy) RestoreLogsOnly(ctx context.Context, w, errW io.W
 		return nil, errors.New("missing checkpoint ID")
 	}
 
-	// Get checkpoint store
+	// Get v1 checkpoint store (always needed for fallback)
 	store, err := s.getCheckpointStore()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get checkpoint store: %w", err)
 	}
 
-	// Read checkpoint summary to get session count
-	summary, err := store.ReadCommitted(ctx, point.CheckpointID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read checkpoint: %w", err)
+	// Read checkpoint summary — try v2 first when enabled
+	var summary *cpkg.CheckpointSummary
+	v2Enabled := settings.IsCheckpointsV2Enabled(ctx)
+	if v2Enabled {
+		v2Store, v2Err := s.getV2CheckpointStore()
+		if v2Err == nil {
+			summary, _ = v2Store.ReadCommitted(ctx, point.CheckpointID)
+		}
+	}
+	if summary == nil {
+		summary, err = store.ReadCommitted(ctx, point.CheckpointID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read checkpoint: %w", err)
+		}
 	}
 	if summary == nil {
 		return nil, fmt.Errorf("checkpoint not found: %s", point.CheckpointID)
@@ -673,7 +684,25 @@ func (s *ManualCommitStrategy) RestoreLogsOnly(ctx context.Context, w, errW io.W
 	// Restore all sessions (oldest to newest, using 0-based indexing)
 	var restored []RestoredSession
 	for i := range totalSessions {
-		content, readErr := store.ReadSessionContent(ctx, point.CheckpointID, i)
+		var content *cpkg.SessionContent
+		var readErr error
+
+		// Try v2 first when enabled
+		if v2Enabled {
+			v2Store, v2Err := s.getV2CheckpointStore()
+			if v2Err == nil {
+				content, readErr = v2Store.ReadSessionContent(ctx, point.CheckpointID, i)
+				if readErr != nil || content == nil || len(content.Transcript) == 0 {
+					content = nil // Fall through to v1
+				}
+			}
+		}
+
+		// Fall back to v1
+		if content == nil {
+			content, readErr = store.ReadSessionContent(ctx, point.CheckpointID, i)
+		}
+
 		if readErr != nil {
 			fmt.Fprintf(errW, "  Warning: failed to read session %d: %v\n", i, readErr)
 			continue
