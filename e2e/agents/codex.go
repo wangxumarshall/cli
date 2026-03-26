@@ -154,7 +154,6 @@ func (c *Codex) StartSession(ctx context.Context, dir string) (Session, error) {
 
 	s, err := NewTmuxSession(name, dir, []string{"CODEX_HOME", "ENTIRE_TEST_TTY"}, "env",
 		"CODEX_HOME="+home,
-		"OPENAI_API_KEY="+os.Getenv("OPENAI_API_KEY"),
 		"HOME="+os.Getenv("HOME"),
 		"TERM="+os.Getenv("TERM"),
 		"codex", "--dangerously-bypass-approvals-and-sandbox",
