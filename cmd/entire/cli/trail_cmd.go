@@ -24,6 +24,8 @@ import (
 )
 
 func newTrailCmd() *cobra.Command {
+	var insecureHTTPAuth bool
+
 	cmd := &cobra.Command{
 		Use:    "trail",
 		Short:  "Manage trails for your branches",
@@ -34,8 +36,14 @@ func newTrailCmd() *cobra.Command {
 Running 'entire trail' without a subcommand shows the trail for the current
 branch, or lists all trails if no trail exists for the current branch.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runTrailShow(cmd.Context(), cmd.OutOrStdout())
+			return runTrailShow(cmd.Context(), cmd.OutOrStdout(), insecureHTTPAuth)
 		},
+	}
+
+	cmd.PersistentFlags().BoolVar(&insecureHTTPAuth, "insecure-http-auth", false,
+		"Allow API calls over plain HTTP (insecure, for local development only)")
+	if err := cmd.PersistentFlags().MarkHidden("insecure-http-auth"); err != nil {
+		panic(fmt.Sprintf("hide insecure-http-auth flag: %v", err))
 	}
 
 	cmd.AddCommand(newTrailListCmd())
@@ -45,14 +53,20 @@ branch, or lists all trails if no trail exists for the current branch.`,
 	return cmd
 }
 
+// trailInsecureHTTP reads the persistent --insecure-http-auth flag from the trail root command.
+func trailInsecureHTTP(cmd *cobra.Command) bool {
+	v, _ := cmd.Flags().GetBool("insecure-http-auth") //nolint:errcheck // flag is always registered
+	return v
+}
+
 // runTrailShow shows the trail for the current branch, or falls through to list.
-func runTrailShow(ctx context.Context, w io.Writer) error {
+func runTrailShow(ctx context.Context, w io.Writer, insecureHTTP bool) error {
 	branch, err := GetCurrentBranch(ctx)
 	if err != nil {
-		return runTrailListAll(ctx, w, "", false, false)
+		return runTrailListAll(ctx, w, "", false, false, insecureHTTP)
 	}
 
-	client, err := NewAuthenticatedAPIClient()
+	client, err := NewAuthenticatedAPIClient(insecureHTTP)
 	if err != nil {
 		return fmt.Errorf("authentication required: %w", err)
 	}
@@ -67,7 +81,7 @@ func runTrailShow(ctx context.Context, w io.Writer) error {
 		return err
 	}
 	if found == nil {
-		return runTrailListAll(ctx, w, "", false, false)
+		return runTrailListAll(ctx, w, "", false, false, insecureHTTP)
 	}
 
 	printTrailDetails(w, found.ToMetadata())
@@ -103,7 +117,7 @@ func newTrailListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List all trails",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runTrailListAll(cmd.Context(), cmd.OutOrStdout(), statusFilter, jsonOutput, showAll)
+			return runTrailListAll(cmd.Context(), cmd.OutOrStdout(), statusFilter, jsonOutput, showAll, trailInsecureHTTP(cmd))
 		},
 	}
 
@@ -114,8 +128,8 @@ func newTrailListCmd() *cobra.Command {
 	return cmd
 }
 
-func runTrailListAll(ctx context.Context, w io.Writer, statusFilter string, jsonOutput, showAll bool) error {
-	client, err := NewAuthenticatedAPIClient()
+func runTrailListAll(ctx context.Context, w io.Writer, statusFilter string, jsonOutput, showAll, insecureHTTP bool) error {
+	client, err := NewAuthenticatedAPIClient(insecureHTTP)
 	if err != nil {
 		return fmt.Errorf("authentication required: %w", err)
 	}
@@ -302,7 +316,7 @@ func runTrailCreate(cmd *cobra.Command, title, body, base, branch, statusStr str
 
 	// --- Phase 2: API operations ---
 
-	client, err := NewAuthenticatedAPIClient()
+	client, err := NewAuthenticatedAPIClient(trailInsecureHTTP(cmd))
 	if err != nil {
 		return fmt.Errorf("authentication required: %w", err)
 	}
@@ -372,7 +386,7 @@ func newTrailUpdateCmd() *cobra.Command {
 		Use:   "update",
 		Short: "Update trail metadata",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runTrailUpdate(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), statusStr, title, body, branch, labelAdd, labelRemove)
+			return runTrailUpdate(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), trailInsecureHTTP(cmd), statusStr, title, body, branch, labelAdd, labelRemove)
 		},
 	}
 
@@ -386,10 +400,10 @@ func newTrailUpdateCmd() *cobra.Command {
 	return cmd
 }
 
-func runTrailUpdate(ctx context.Context, w, errW io.Writer, statusStr, title, body, branch string, labelAdd, labelRemove []string) error {
+func runTrailUpdate(ctx context.Context, w, errW io.Writer, insecureHTTP bool, statusStr, title, body, branch string, labelAdd, labelRemove []string) error {
 	_ = errW // reserved for future warnings
 
-	client, err := NewAuthenticatedAPIClient()
+	client, err := NewAuthenticatedAPIClient(insecureHTTP)
 	if err != nil {
 		return fmt.Errorf("authentication required: %w", err)
 	}
