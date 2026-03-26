@@ -27,12 +27,17 @@ import (
 const DefaultMaxCheckpointsPerGeneration = 100
 
 // GenerationMetadata tracks the state of a /full/* generation.
+// A "generation" is a batch of raw transcripts stored under a single ref.
+// The active generation lives at /full/current; when it reaches the checkpoint
+// limit, it is archived as a numbered ref (e.g., /full/0000000000001) and a
+// fresh /full/current is created. Archived generations can later be cleaned up
+// based on their timestamps (see RFD-009 cleanup path).
+//
 // Stored at the tree root as generation.json and updated on every WriteCommitted.
 // UpdateCommitted (stop-time finalization) does NOT update this file since it
 // replaces an existing transcript rather than adding a new checkpoint.
 //
-// The generation's sequence number is derived from the ref name (e.g.,
-// refs/entire/checkpoints/v2/full/0000000000001 → generation 1), not stored
+// The generation's sequence number is derived from the ref name, not stored
 // in this struct. The checkpoint count is len(Checkpoints).
 type GenerationMetadata struct {
 	// Checkpoints is the list of checkpoint IDs stored in this generation.
