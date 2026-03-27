@@ -299,7 +299,7 @@ func parseLine(lineBytes []byte, preprocess linePreprocessor) (parsedEntry, bool
 		if turRaw, ok := raw["toolUseResult"]; ok {
 			var tur map[string]json.RawMessage
 			if json.Unmarshal(turRaw, &tur) == nil {
-				enrichToolResults(e.toolResults, tur)
+				e.toolResults = enrichToolResults(e.toolResults, tur)
 			}
 		}
 	}
@@ -436,7 +436,7 @@ type toolResultFile struct {
 //   - Read:  {type:"text", file:{filePath, numLines, content, ...}}
 //   - Grep:  {numFiles, numLines, filenames, content, mode}
 //   - Edit:  {filePath, oldString, newString, structuredPatch, ...}
-func enrichToolResults(results []toolResultEntry, tur map[string]json.RawMessage) {
+func enrichToolResults(results []toolResultEntry, tur map[string]json.RawMessage) []toolResultEntry {
 	// Bash-style: stdout provides the output text.
 	if stdout := unquote(tur["stdout"]); stdout != "" {
 		switch len(results) {
@@ -478,6 +478,8 @@ func enrichToolResults(results []toolResultEntry, tur map[string]json.RawMessage
 			})
 		}
 	}
+
+	return results
 }
 
 // applyToSingleResult applies fn to the first (and expected only) tool result.
