@@ -114,6 +114,7 @@ type parsedEntry struct {
 	userID      string            // prompt ID (user only, e.g. Claude's promptId)
 	content     json.RawMessage   // stripped assistant content array, or nil
 	userText    string            // extracted user text
+	userImages  []json.RawMessage // image blocks from user messages
 	toolResults []toolResultEntry // user tool_result entries
 }
 
@@ -152,9 +153,9 @@ func compactJSONLWith(content []byte, opts Options, preprocess linePreprocessor)
 				merged = inlineToolResults(merged, userEntry)
 				i++ // consume the user tool_result entry
 
-				// If the consumed user entry also had text content, emit it
+				// If the consumed user entry also had text or image content, emit it
 				// as a separate user line after the assistant.
-				if userEntry.userText != "" {
+				if userEntry.userText != "" || len(userEntry.userImages) > 0 {
 					emitAssistant(&result, meta, merged)
 					emitUser(&result, meta, userEntry)
 					continue
@@ -171,8 +172,8 @@ func compactJSONLWith(content []byte, opts Options, preprocess linePreprocessor)
 			// User entries that are purely tool results were already consumed
 			// by the assistant look-ahead above. If we reach one here it was
 			// not preceded by an assistant with a matching tool_use, so emit
-			// it only if it has text content.
-			if hasToolResults(e) && e.userText == "" {
+			// it only if it has text or image content.
+			if hasToolResults(e) && e.userText == "" && len(e.userImages) == 0 {
 				continue
 			}
 			emitUser(&result, meta, e)
@@ -197,11 +198,21 @@ func emitAssistant(result *[]byte, meta compactMeta, e parsedEntry) {
 }
 
 func emitUser(result *[]byte, meta compactMeta, e parsedEntry) {
-	block := marshalOrdered(
-		"id", jsonStringOrNil(e.userID),
-		"text", mustMarshal(e.userText),
-	)
-	contentJSON := mustMarshal([]json.RawMessage{block})
+	var blocks []json.RawMessage
+
+	// Text block (with optional prompt ID).
+	if e.userText != "" || len(e.userImages) == 0 {
+		block := marshalOrdered(
+			"id", jsonStringOrNil(e.userID),
+			"text", mustMarshal(e.userText),
+		)
+		blocks = append(blocks, block)
+	}
+
+	// Image blocks passed through verbatim.
+	blocks = append(blocks, e.userImages...)
+
+	contentJSON := mustMarshal(blocks)
 
 	b := marshalOrdered(
 		"v", meta.v,
@@ -278,27 +289,17 @@ func parseLine(lineBytes []byte, preprocess linePreprocessor) (parsedEntry, bool
 		e.userID = unquote(raw["promptId"])
 		if msg != nil {
 			if contentRaw, ok := msg["content"]; ok {
-				text, toolResults := extractUserContent(contentRaw)
-				e.userText = text
-				e.toolResults = toolResults
+				uc := extractUserContent(contentRaw)
+				e.userText = uc.text
+				e.userImages = uc.images
+				e.toolResults = uc.toolResults
 			}
 		}
-		// Also check toolUseResult.stdout which may have the output.
+		// Enrich tool results with metadata from toolUseResult.
 		if turRaw, ok := raw["toolUseResult"]; ok {
 			var tur map[string]json.RawMessage
 			if json.Unmarshal(turRaw, &tur) == nil {
-				if stdout := unquote(tur["stdout"]); stdout != "" {
-					switch len(e.toolResults) {
-					case 0:
-						// Keep compatibility with transcripts that only include toolUseResult.
-						e.toolResults = []toolResultEntry{{
-							output: stdout,
-						}}
-					case 1:
-						// toolUseResult is a single envelope for one tool call.
-						e.toolResults[0].output = stdout
-					}
-				}
+				e.toolResults = enrichToolResults(e.toolResults, tur)
 			}
 		}
 	}
@@ -347,15 +348,7 @@ func inlineToolResults(assistant, user parsedEntry) parsedEntry {
 			continue
 		}
 
-		status := "success"
-		if tr.isError {
-			status = "error"
-		}
-		resultObj := marshalOrdered(
-			"output", mustMarshal(tr.output),
-			"status", mustMarshal(status),
-		)
-		blocks[idx]["result"] = resultObj
+		blocks[idx]["result"] = buildToolResult(tr)
 	}
 
 	if data, err := json.Marshal(blocks); err == nil {
@@ -363,6 +356,43 @@ func inlineToolResults(assistant, user parsedEntry) parsedEntry {
 	}
 
 	return assistant
+}
+
+// buildToolResult constructs the compact result object for a tool_use block,
+// including optional rich metadata (file, matchCount) when available.
+func buildToolResult(tr toolResultEntry) json.RawMessage {
+	status := "success"
+	if tr.isError {
+		status = "error"
+	}
+
+	// Build file metadata JSON if present.
+	var fileJSON json.RawMessage
+	if tr.file != nil {
+		if tr.file.numLines > 0 {
+			fileJSON = marshalOrdered(
+				"filePath", mustMarshal(tr.file.filePath),
+				"numLines", mustMarshal(tr.file.numLines),
+			)
+		} else {
+			fileJSON = marshalOrdered(
+				"filePath", mustMarshal(tr.file.filePath),
+			)
+		}
+	}
+
+	// matchCount: only include if > 0.
+	var matchCountJSON json.RawMessage
+	if tr.matchCount > 0 {
+		matchCountJSON = mustMarshal(tr.matchCount)
+	}
+
+	return marshalOrdered(
+		"output", mustMarshal(tr.output),
+		"status", mustMarshal(status),
+		"file", fileJSON,
+		"matchCount", matchCountJSON,
+	)
 }
 
 // jsonStringOrNil returns a JSON-encoded string, or nil if s is empty.
@@ -387,6 +417,78 @@ type toolResultEntry struct {
 	toolUseID string
 	output    string
 	isError   bool
+	// Rich metadata extracted from toolUseResult (optional).
+	file       *toolResultFile // Read/Edit: file path and line count
+	matchCount int             // Grep: number of matching files
+}
+
+// toolResultFile carries structured file metadata from Read/Edit tool results.
+type toolResultFile struct {
+	filePath string
+	numLines int // 0 if not available (e.g. Edit results)
+}
+
+// enrichToolResults extracts structured metadata from a toolUseResult envelope
+// and attaches it to the corresponding tool result entries.
+//
+// Claude Code's toolUseResult has different shapes per tool:
+//   - Bash:  {stdout, stderr, interrupted, ...}
+//   - Read:  {type:"text", file:{filePath, numLines, content, ...}}
+//   - Grep:  {numFiles, numLines, filenames, content, mode}
+//   - Edit:  {filePath, oldString, newString, structuredPatch, ...}
+func enrichToolResults(results []toolResultEntry, tur map[string]json.RawMessage) []toolResultEntry {
+	// Bash-style: stdout provides the output text.
+	if stdout := unquote(tur["stdout"]); stdout != "" {
+		switch len(results) {
+		case 0:
+			// Keep compatibility with transcripts that only include toolUseResult.
+			results = append(results, toolResultEntry{output: stdout})
+		case 1:
+			results[0].output = stdout
+		}
+	}
+
+	// Read-style: file object with filePath and numLines.
+	if fileRaw, ok := tur["file"]; ok {
+		var file struct {
+			FilePath string `json:"filePath"`
+			NumLines int    `json:"numLines"`
+		}
+		if json.Unmarshal(fileRaw, &file) == nil && file.FilePath != "" {
+			applyToSingleResult(results, func(tr *toolResultEntry) {
+				tr.file = &toolResultFile{filePath: file.FilePath, numLines: file.NumLines}
+			})
+		}
+	}
+
+	// Edit-style: top-level filePath.
+	if filePath := unquote(tur["filePath"]); filePath != "" {
+		applyToSingleResult(results, func(tr *toolResultEntry) {
+			// Edit results don't have numLines.
+			tr.file = &toolResultFile{filePath: filePath}
+		})
+	}
+
+	// Grep-style: numFiles as match count.
+	if numFilesRaw, ok := tur["numFiles"]; ok {
+		var n int
+		if json.Unmarshal(numFilesRaw, &n) == nil && n > 0 {
+			applyToSingleResult(results, func(tr *toolResultEntry) {
+				tr.matchCount = n
+			})
+		}
+	}
+
+	return results
+}
+
+// applyToSingleResult applies fn to the first (and expected only) tool result.
+// toolUseResult is a single-tool envelope, so this is only meaningful when
+// there's exactly one result entry.
+func applyToSingleResult(results []toolResultEntry, fn func(*toolResultEntry)) {
+	if len(results) == 1 {
+		fn(&results[0])
+	}
 }
 
 // parseMessage extracts and parses the "message" field from a JSONL transcript
@@ -403,47 +505,60 @@ func parseMessage(raw map[string]json.RawMessage) map[string]json.RawMessage {
 	return nil
 }
 
-// extractUserContent separates user message content into text and tool_result entries.
+// userContent holds the extracted parts of a user message content array.
+type userContent struct {
+	text        string
+	images      []json.RawMessage
+	toolResults []toolResultEntry
+}
+
+// extractUserContent separates user message content into text, images, and tool_result entries.
 // IDE context tags (e.g. <user_query>, <ide_opened_file>) are stripped from user text.
-func extractUserContent(contentRaw json.RawMessage) (string, []toolResultEntry) {
+func extractUserContent(contentRaw json.RawMessage) userContent {
 	var str string
 	if json.Unmarshal(contentRaw, &str) == nil {
-		return textutil.StripIDEContextTags(str), nil
+		return userContent{text: textutil.StripIDEContextTags(str)}
 	}
 
-	var blocks []map[string]json.RawMessage
+	var blocks []json.RawMessage
 	if json.Unmarshal(contentRaw, &blocks) != nil {
-		return "", nil
+		return userContent{}
 	}
 
-	var texts []string
-	var toolResults []toolResultEntry
+	var uc userContent
 
-	for _, block := range blocks {
+	for _, blockRaw := range blocks {
+		var block map[string]json.RawMessage
+		if json.Unmarshal(blockRaw, &block) != nil {
+			continue
+		}
 		blockType := unquote(block["type"])
 
-		if blockType == "tool_result" {
+		switch blockType {
+		case "tool_result":
 			var isErr bool
 			if raw, ok := block["is_error"]; ok {
 				_ = json.Unmarshal(raw, &isErr) //nolint:errcheck // best-effort
 			}
-			toolResults = append(toolResults, toolResultEntry{
+			uc.toolResults = append(uc.toolResults, toolResultEntry{
 				toolUseID: unquote(block["tool_use_id"]),
 				output:    unquote(block["content"]),
 				isError:   isErr,
 			})
-			continue
-		}
 
-		if blockType == transcript.ContentTypeText {
+		case "image":
+			uc.images = append(uc.images, blockRaw)
+
+		case transcript.ContentTypeText:
 			stripped := textutil.StripIDEContextTags(unquote(block[transcript.ContentTypeText]))
 			if stripped != "" {
-				texts = append(texts, stripped)
+				uc.text += stripped + "\n\n"
 			}
 		}
 	}
 
-	return strings.Join(texts, "\n\n"), toolResults
+	uc.text = strings.TrimSpace(uc.text)
+	return uc
 }
 
 func stripAssistantContent(contentRaw json.RawMessage) json.RawMessage {
