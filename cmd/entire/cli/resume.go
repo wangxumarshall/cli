@@ -631,7 +631,9 @@ func promptResumeFromOlderCheckpoint() (bool, error) {
 func checkRemoteMetadata(ctx context.Context, checkpointID id.CheckpointID) error {
 	logCtx := logging.WithComponent(ctx, "resume.checkRemoteMetadata")
 
-	// Try v2 /main ref first when enabled
+	// Try v2 /main ref first when enabled.
+	// Only fetches /main (metadata), not /full/* (transcripts). If /full/* refs
+	// aren't local, RestoreLogsOnly falls back to v1 for transcript data.
 	if settings.IsCheckpointsV2Enabled(ctx) {
 		v2Tree, v2Repo, v2Err := getV2MetadataTree(ctx)
 		if v2Err == nil {
