@@ -122,8 +122,8 @@ func normalizeKind(raw map[string]json.RawMessage) string {
 	return ""
 }
 
-// compactJSONL converts JSONL transcripts (Claude Code, Cursor) into the
-// transcript.jsonl format
+// parsedEntry is an intermediate representation of a JSONL line used during
+// the two-pass compact conversion.
 type parsedEntry struct {
 	kind         string // "user" or "assistant"
 	ts           json.RawMessage
@@ -137,6 +137,8 @@ type parsedEntry struct {
 	toolResults  []toolResultEntry // user tool_result entries
 }
 
+// compactJSONL converts JSONL transcripts (Claude Code, Cursor) into the
+// transcript.jsonl format.
 func compactJSONL(content []byte, opts MetadataFields) ([]byte, error) {
 	base := newTranscriptLine(opts)
 
@@ -230,8 +232,6 @@ func emitUser(result *[]byte, base transcriptLine, e parsedEntry) {
 	line := base
 	line.Type = transcript.TypeUser
 	line.TS = e.ts
-	line.InputTokens = e.inputTokens
-	line.OutputTokens = e.outputTokens
 	line.Content = contentJSON
 	appendLine(result, line)
 }
