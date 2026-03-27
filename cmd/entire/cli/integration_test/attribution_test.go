@@ -683,6 +683,141 @@ func TestManualCommit_AttributionStaleBase(t *testing.T) {
 	}
 }
 
+// TestManualCommit_AttributionStaleBase_BranchSwitch tests attribution when the user
+// switches branches mid-session and makes a commit on a different branch.
+//
+// Production scenario (observed on entire.io):
+// 1. Agent works on feature branch → commit (condensation, attribution correct)
+// 2. New prompt (session ACTIVE)
+// 3. User switches to a different branch, makes a commit there
+//    → PostCommit processes session from the feature branch
+//    → BaseCommit set to commit on the OTHER branch, AttributionBaseCommit stale
+// 4. User switches back to feature branch, agent works → commit
+// 5. Attribution should only reflect changes in this cycle, not cross-branch diff
+func TestManualCommit_AttributionStaleBase_BranchSwitch(t *testing.T) {
+	t.Parallel()
+	env := NewTestEnv(t)
+	defer env.Cleanup()
+
+	env.InitRepo()
+
+	// Create initial commit on main
+	env.WriteFile("main.go", "package main\n")
+	env.GitAdd("main.go")
+	env.GitCommit("Initial commit")
+
+	env.InitEntire()
+
+	// Create feature branch (Entire skips main/master)
+	env.GitCheckoutNewBranch("feature/polish")
+
+	// ========================================
+	// FIRST CYCLE: Agent works on feature branch
+	// ========================================
+	session := env.NewSession()
+	if err := env.SimulateUserPromptSubmit(session.ID); err != nil {
+		t.Fatalf("SimulateUserPromptSubmit (cycle 1) failed: %v", err)
+	}
+
+	cycle1Content := "package main\n\nfunc agentFunc1() {\n\treturn 1\n}\n"
+	env.WriteFile("main.go", cycle1Content)
+
+	session.CreateTranscript(
+		"Add function",
+		[]FileChange{{Path: "main.go", Content: cycle1Content}},
+	)
+	if err := env.SimulateStop(session.ID, session.TranscriptPath); err != nil {
+		t.Fatalf("SimulateStop (cycle 1) failed: %v", err)
+	}
+
+	env.GitCommitWithShadowHooks("First agent commit", "main.go")
+	t.Logf("First commit on feature/polish: %s", env.GetHeadHash()[:7])
+
+	// ========================================
+	// BRANCH SWITCH: User goes to another branch, commits, comes back
+	// ========================================
+
+	// Start new prompt so session is ACTIVE during the branch switch
+	if err := env.SimulateUserPromptSubmit(session.ID); err != nil {
+		t.Fatalf("SimulateUserPromptSubmit (pre-switch) failed: %v", err)
+	}
+
+	// Switch to a different branch and make a commit with many files
+	env.GitCheckoutNewBranch("feature/other-work")
+
+	unrelatedContent := "package utils\n\n"
+	for i := range 50 {
+		unrelatedContent += fmt.Sprintf("func util%d() { return %d }\n", i, i)
+	}
+	env.WriteFile("utils.go", unrelatedContent)
+	env.GitCommitWithShadowHooks("Other branch work", "utils.go")
+	t.Logf("Commit on feature/other-work: %s", env.GetHeadHash()[:7])
+
+	// Switch back to original branch
+	env.GitCheckoutBranch("feature/polish")
+	t.Logf("Back on feature/polish: %s", env.GetHeadHash()[:7])
+
+	// ========================================
+	// SECOND CYCLE: Agent works on feature branch again
+	// ========================================
+
+	cycle2Content := cycle1Content + "\nfunc agentFunc2() {\n\treturn 2\n}\n"
+	env.WriteFile("main.go", cycle2Content)
+
+	session.CreateTranscript(
+		"Add second function",
+		[]FileChange{{Path: "main.go", Content: cycle2Content}},
+	)
+	if err := env.SimulateStop(session.ID, session.TranscriptPath); err != nil {
+		t.Fatalf("SimulateStop (cycle 2) failed: %v", err)
+	}
+
+	env.GitCommitWithShadowHooks("Second agent commit", "main.go")
+
+	secondCommitHead := env.GetHeadHash()
+	t.Logf("Second commit on feature/polish: %s", secondCommitHead[:7])
+
+	// ========================================
+	// VERIFY: Attribution should not be contaminated by the other branch
+	// ========================================
+
+	repo, err := git.PlainOpen(env.RepoDir)
+	if err != nil {
+		t.Fatalf("failed to open repo: %v", err)
+	}
+
+	commitObj, err := repo.CommitObject(plumbing.NewHash(secondCommitHead))
+	if err != nil {
+		t.Fatalf("failed to get second commit: %v", err)
+	}
+
+	cpID, found := trailers.ParseCheckpoint(commitObj.Message)
+	if !found {
+		t.Fatal("Second commit should have Entire-Checkpoint trailer")
+	}
+
+	attr := getAttributionFromMetadata(t, repo, cpID)
+	t.Logf("Second cycle attribution: agent=%d, human_added=%d, human_modified=%d, human_removed=%d, total=%d, pct=%.1f%%",
+		attr.AgentLines, attr.HumanAdded, attr.HumanModified, attr.HumanRemoved,
+		attr.TotalCommitted, attr.AgentPercentage)
+
+	// utils.go only exists on feature/other-work, not on feature/polish.
+	// Attribution should only reflect the agent's work on main.go.
+	if attr.HumanAdded != 0 {
+		t.Errorf("HumanAdded = %d, want 0 (other branch's utils.go should not contaminate attribution)",
+			attr.HumanAdded)
+	}
+
+	if attr.AgentLines <= 0 {
+		t.Errorf("AgentLines = %d, should be > 0", attr.AgentLines)
+	}
+
+	if attr.AgentPercentage != 100 {
+		t.Errorf("AgentPercentage = %.1f%%, want 100%% (only agent lines in this commit)",
+			attr.AgentPercentage)
+	}
+}
+
 // getAttributionFromMetadata reads attribution from a checkpoint on entire/checkpoints/v1 branch.
 // InitialAttribution is stored in session-level metadata (0/metadata.json).
 func getAttributionFromMetadata(t *testing.T, repo *git.Repository, checkpointID id.CheckpointID) *checkpoint.InitialAttribution {
