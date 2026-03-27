@@ -101,11 +101,17 @@ func emitOpenCodeUser(result *[]byte, base transcriptLine, msg openCodeMessage, 
 		if id := part["id"]; id != nil {
 			_ = json.Unmarshal(id, &tb.ID) //nolint:errcheck // best-effort
 		}
-		b, _ := json.Marshal(tb) //nolint:errcheck,errchkjson // struct of strings never fails
+		b, err := json.Marshal(tb)
+		if err != nil {
+			continue
+		}
 		blocks = append(blocks, b)
 	}
 
-	contentJSON, _ := json.Marshal(blocks) //nolint:errcheck,errchkjson // slice of valid JSON never fails
+	contentJSON, err := json.Marshal(blocks)
+	if err != nil {
+		return
+	}
 
 	line := base
 	line.Type = transcript.TypeUser
@@ -122,14 +128,20 @@ func emitOpenCodeAssistant(result *[]byte, base transcriptLine, msg openCodeMess
 
 		switch partType {
 		case transcript.ContentTypeText:
-			b, _ := json.Marshal(transcript.ContentTypeText) //nolint:errcheck,errchkjson // string never fails
+			b, err := json.Marshal(transcript.ContentTypeText)
+			if err != nil {
+				continue
+			}
 			content = append(content, map[string]json.RawMessage{
 				"type": b,
 				"text": part[transcript.ContentTypeText],
 			})
 		case "tool":
 			toolBlock := make(map[string]json.RawMessage)
-			b, _ := json.Marshal(transcript.ContentTypeToolUse) //nolint:errcheck,errchkjson // string never fails
+			b, err := json.Marshal(transcript.ContentTypeToolUse)
+			if err != nil {
+				continue
+			}
 			toolBlock["type"] = b
 			if callID := part["callID"]; callID != nil {
 				toolBlock["id"] = callID
@@ -150,7 +162,10 @@ func emitOpenCodeAssistant(result *[]byte, base transcriptLine, msg openCodeMess
 		}
 	}
 
-	contentJSON, _ := json.Marshal(content) //nolint:errcheck,errchkjson // slice of valid JSON never fails
+	contentJSON, err := json.Marshal(content)
+	if err != nil {
+		return
+	}
 
 	line := base
 	line.Type = transcript.TypeAssistant
@@ -174,7 +189,10 @@ func openCodeToolResult(state map[string]json.RawMessage) json.RawMessage {
 	if s := unquote(state["status"]); s != "" && s != "completed" {
 		r.Status = "error"
 	}
-	b, _ := json.Marshal(r) //nolint:errcheck,errchkjson // struct of primitives never fails
+	b, err := json.Marshal(r)
+	if err != nil {
+		return nil
+	}
 	return b
 }
 
@@ -184,6 +202,9 @@ func msToTimestamp(ms int64) json.RawMessage {
 		return nil
 	}
 	t := time.UnixMilli(ms).UTC()
-	b, _ := json.Marshal(t.Format(time.RFC3339Nano)) //nolint:errcheck,errchkjson // string never fails
+	b, err := json.Marshal(t.Format(time.RFC3339Nano))
+	if err != nil {
+		return nil
+	}
 	return b
 }

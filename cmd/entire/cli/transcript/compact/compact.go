@@ -229,14 +229,20 @@ func emitUser(result *[]byte, base transcriptLine, e parsedEntry) {
 
 	// Text block (with optional prompt ID).
 	if e.userText != "" || len(e.userImages) == 0 {
-		b, _ := json.Marshal(userTextBlock{ID: e.userID, Text: e.userText}) //nolint:errcheck,errchkjson // struct of strings never fails
+		b, err := json.Marshal(userTextBlock{ID: e.userID, Text: e.userText})
+		if err != nil {
+			return
+		}
 		blocks = append(blocks, b)
 	}
 
 	// Image blocks passed through verbatim.
 	blocks = append(blocks, e.userImages...)
 
-	contentJSON, _ := json.Marshal(blocks) //nolint:errcheck,errchkjson // slice of valid JSON never fails
+	contentJSON, err := json.Marshal(blocks)
+	if err != nil {
+		return
+	}
 
 	line := base
 	line.Type = transcript.TypeUser
@@ -249,7 +255,10 @@ func emitUser(result *[]byte, base transcriptLine, e parsedEntry) {
 
 // appendLine marshals a transcriptLine and appends it (with newline) to result.
 func appendLine(result *[]byte, line transcriptLine) {
-	b, _ := json.Marshal(line) //nolint:errcheck,errchkjson // struct of primitives + RawMessage never fails
+	b, err := json.Marshal(line)
+	if err != nil {
+		return
+	}
 	*result = append(*result, b...)
 	*result = append(*result, '\n')
 }
@@ -411,7 +420,10 @@ func buildToolResult(tr toolResultEntry) json.RawMessage {
 			NumLines: tr.file.numLines,
 		}
 	}
-	b, _ := json.Marshal(r) //nolint:errcheck,errchkjson // struct of primitives never fails
+	b, err := json.Marshal(r)
+	if err != nil {
+		return nil
+	}
 	return b
 }
 
