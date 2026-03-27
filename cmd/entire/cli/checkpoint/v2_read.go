@@ -3,12 +3,11 @@ package checkpoint
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/entireio/cli/cmd/entire/cli/agent"
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint/id"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 
@@ -140,7 +139,10 @@ func (s *V2GitStore) resolveTranscriptFromFull(ctx context.Context, checkpointID
 }
 
 // readTranscriptFromRef reads the raw transcript from a specific /full/* ref.
-// Handles both chunked and non-chunked transcripts.
+// Follows the same chunking convention as readTranscriptFromTree in committed.go:
+// chunk 0 is the base file (full.jsonl), chunks 1+ are full.jsonl.001, .002, etc.
+// When chunk files exist, all chunks (including chunk 0) are reassembled with
+// JSONL-aware newline handling via agent.ReassembleJSONL.
 func (s *V2GitStore) readTranscriptFromRef(refName plumbing.ReferenceName, sessionPath string) ([]byte, error) {
 	_, rootTreeHash, err := s.getRefState(refName)
 	if err != nil {
@@ -157,59 +159,64 @@ func (s *V2GitStore) readTranscriptFromRef(refName plumbing.ReferenceName, sessi
 		return nil, fmt.Errorf("session path %s not found: %w", sessionPath, err)
 	}
 
-	file, err := sessionTree.File(paths.TranscriptFileName)
-	if err == nil {
-		content, contentErr := file.Contents()
-		if contentErr == nil {
-			return []byte(content), nil
-		}
-	}
-
-	return readChunkedTranscriptFromTree(sessionTree)
+	return readTranscriptFromObjectTree(sessionTree)
 }
 
-// readChunkedTranscriptFromTree reads and reassembles chunked transcript files from a tree.
-func readChunkedTranscriptFromTree(tree *object.Tree) ([]byte, error) {
-	var chunks []struct {
-		index int
-		name  string
-	}
+// readTranscriptFromObjectTree reads and reassembles a transcript from a git tree object.
+// Handles both chunked and non-chunked transcripts.
+func readTranscriptFromObjectTree(tree *object.Tree) ([]byte, error) {
+	var chunkFiles []string
+	var hasBaseFile bool
 
 	for _, entry := range tree.Entries {
+		if entry.Name == paths.TranscriptFileName {
+			hasBaseFile = true
+		}
 		if strings.HasPrefix(entry.Name, paths.TranscriptFileName+".") {
-			suffix := strings.TrimPrefix(entry.Name, paths.TranscriptFileName+".")
-			idx, err := strconv.Atoi(suffix)
-			if err == nil && idx > 0 {
-				chunks = append(chunks, struct {
-					index int
-					name  string
-				}{index: idx, name: entry.Name})
+			idx := agent.ParseChunkIndex(entry.Name, paths.TranscriptFileName)
+			if idx > 0 {
+				chunkFiles = append(chunkFiles, entry.Name)
 			}
 		}
 	}
 
-	if len(chunks) == 0 {
-		return nil, errors.New("no transcript files found")
+	// If chunk files exist, reassemble all chunks (base file is chunk 0)
+	if len(chunkFiles) > 0 {
+		chunkFiles = agent.SortChunkFiles(chunkFiles, paths.TranscriptFileName)
+		if hasBaseFile {
+			chunkFiles = append([]string{paths.TranscriptFileName}, chunkFiles...)
+		}
+
+		var chunks [][]byte
+		for _, chunkFile := range chunkFiles {
+			file, fileErr := tree.File(chunkFile)
+			if fileErr != nil {
+				continue
+			}
+			content, contentErr := file.Contents()
+			if contentErr != nil {
+				continue
+			}
+			chunks = append(chunks, []byte(content))
+		}
+
+		if len(chunks) > 0 {
+			return agent.ReassembleJSONL(chunks), nil
+		}
 	}
 
-	sort.Slice(chunks, func(i, j int) bool {
-		return chunks[i].index < chunks[j].index
-	})
-
-	var result []byte
-	for _, chunk := range chunks {
-		file, err := tree.File(chunk.name)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read chunk %s: %w", chunk.name, err)
+	// No chunk files — read base file directly (non-chunked transcript)
+	if hasBaseFile {
+		file, err := tree.File(paths.TranscriptFileName)
+		if err == nil {
+			content, contentErr := file.Contents()
+			if contentErr == nil {
+				return []byte(content), nil
+			}
 		}
-		content, err := file.Contents()
-		if err != nil {
-			return nil, fmt.Errorf("failed to read chunk content %s: %w", chunk.name, err)
-		}
-		result = append(result, []byte(content)...)
 	}
 
-	return result, nil
+	return nil, nil //nolint:nilnil // Transcript not found in this ref
 }
 
 // GetSessionLog reads the latest session's raw transcript and session ID from v2 refs.
