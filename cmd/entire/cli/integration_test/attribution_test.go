@@ -4,6 +4,7 @@ package integration
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint"
@@ -513,6 +514,172 @@ func TestManualCommit_AttributionNoDoubleCount(t *testing.T) {
 	// Agent percentage should be 3/4 = 75%
 	if attr2.AgentPercentage < 74.9 || attr2.AgentPercentage > 75.1 {
 		t.Errorf("Second commit AgentPercentage = %.1f%%, want 75.0%%", attr2.AgentPercentage)
+	}
+}
+
+// TestManualCommit_AttributionStaleBase tests that AttributionBaseCommit stays in sync
+// when an unrelated commit advances BaseCommit via postCommitUpdateBaseCommitOnly.
+//
+// Bug scenario (observed in production):
+// 1. Agent works → commit (condensation, both BaseCommit and AttributionBaseCommit advance)
+// 2. New prompt (session becomes ACTIVE)
+// 3. While ACTIVE, user makes unrelated commit (no agent content to condense)
+//    → postCommitUpdateBaseCommitOnly advances BaseCommit but NOT AttributionBaseCommit
+// 4. Agent works → checkpoint → user commits (condensation)
+// 5. Attribution uses stale AttributionBaseCommit, causing getAllChangedFiles to find
+//    the unrelated file, inflating human_added with lines from a prior commit
+func TestManualCommit_AttributionStaleBase(t *testing.T) {
+	t.Parallel()
+	env := NewTestEnv(t)
+	defer env.Cleanup()
+
+	env.InitRepo()
+
+	// Create initial commit
+	env.WriteFile("main.go", "package main\n")
+	env.GitAdd("main.go")
+	env.GitCommit("Initial commit")
+
+	env.InitEntire()
+
+	// ========================================
+	// FIRST CYCLE: Agent works and user commits
+	// ========================================
+	t.Log("First cycle: agent works → checkpoint → commit")
+
+	session := env.NewSession()
+	if err := env.SimulateUserPromptSubmit(session.ID); err != nil {
+		t.Fatalf("SimulateUserPromptSubmit (cycle 1) failed: %v", err)
+	}
+
+	// Agent adds a function (4 lines added)
+	cycle1Content := "package main\n\nfunc agentFunc1() {\n\treturn 1\n}\n"
+	env.WriteFile("main.go", cycle1Content)
+
+	session.CreateTranscript(
+		"Add function",
+		[]FileChange{{Path: "main.go", Content: cycle1Content}},
+	)
+	if err := env.SimulateStop(session.ID, session.TranscriptPath); err != nil {
+		t.Fatalf("SimulateStop (cycle 1) failed: %v", err)
+	}
+
+	// User commits (condensation happens, AttributionBaseCommit advances)
+	env.GitCommitWithShadowHooks("First agent commit", "main.go")
+
+	firstCommitHead := env.GetHeadHash()
+	t.Logf("First commit: %s", firstCommitHead[:7])
+
+	// Verify first cycle attribution is sane
+	repo, err := git.PlainOpen(env.RepoDir)
+	if err != nil {
+		t.Fatalf("failed to open repo: %v", err)
+	}
+
+	commit1Obj, err := repo.CommitObject(plumbing.NewHash(firstCommitHead))
+	if err != nil {
+		t.Fatalf("failed to get first commit: %v", err)
+	}
+
+	cpID1, found := trailers.ParseCheckpoint(commit1Obj.Message)
+	if !found {
+		t.Fatal("First commit should have Entire-Checkpoint trailer")
+	}
+
+	attr1 := getAttributionFromMetadata(t, repo, cpID1)
+	t.Logf("First cycle attribution: agent=%d, human_added=%d, total=%d, pct=%.1f%%",
+		attr1.AgentLines, attr1.HumanAdded, attr1.TotalCommitted, attr1.AgentPercentage)
+
+	// ========================================
+	// INTERLEAVE: Session becomes ACTIVE, then user makes unrelated commit
+	// ========================================
+	t.Log("Starting new prompt (ACTIVE), then making unrelated commit")
+
+	// New prompt → session transitions IDLE → ACTIVE
+	if err := env.SimulateUserPromptSubmit(session.ID); err != nil {
+		t.Fatalf("SimulateUserPromptSubmit (pre-unrelated) failed: %v", err)
+	}
+
+	// User creates a large unrelated file (50 lines) and commits it.
+	// The session is ACTIVE but has no new checkpoint content, so:
+	// - prepare-commit-msg: no Entire-Checkpoint trailer added
+	// - post-commit: calls postCommitUpdateBaseCommitOnly
+	//   → BaseCommit advances to this commit
+	//   → AttributionBaseCommit stays at first commit (BUG)
+	unrelatedContent := "package utils\n\n"
+	for i := range 50 {
+		unrelatedContent += fmt.Sprintf("func util%d() { return %d }\n", i, i)
+	}
+	env.WriteFile("utils.go", unrelatedContent)
+	env.GitCommitWithShadowHooks("Add utility functions", "utils.go")
+
+	unrelatedHead := env.GetHeadHash()
+	t.Logf("Unrelated commit: %s", unrelatedHead[:7])
+
+	// ========================================
+	// SECOND CYCLE: Agent works on main.go again
+	// ========================================
+	t.Log("Second cycle: agent adds another function")
+
+	// Agent adds another function (3 lines: blank + func decl + body + close)
+	cycle2Content := cycle1Content + "\nfunc agentFunc2() {\n\treturn 2\n}\n"
+	env.WriteFile("main.go", cycle2Content)
+
+	session.CreateTranscript(
+		"Add second function",
+		[]FileChange{{Path: "main.go", Content: cycle2Content}},
+	)
+	if err := env.SimulateStop(session.ID, session.TranscriptPath); err != nil {
+		t.Fatalf("SimulateStop (cycle 2) failed: %v", err)
+	}
+
+	// User commits agent work (condensation happens)
+	env.GitCommitWithShadowHooks("Second agent commit", "main.go")
+
+	secondCommitHead := env.GetHeadHash()
+	t.Logf("Second commit: %s", secondCommitHead[:7])
+
+	// ========================================
+	// VERIFY: Attribution should NOT include utils.go lines
+	// ========================================
+
+	commit2Obj, err := repo.CommitObject(plumbing.NewHash(secondCommitHead))
+	if err != nil {
+		t.Fatalf("failed to get second commit: %v", err)
+	}
+
+	cpID2, found := trailers.ParseCheckpoint(commit2Obj.Message)
+	if !found {
+		t.Fatal("Second commit should have Entire-Checkpoint trailer")
+	}
+
+	attr2 := getAttributionFromMetadata(t, repo, cpID2)
+	t.Logf("Second cycle attribution: agent=%d, human_added=%d, human_modified=%d, human_removed=%d, total=%d, pct=%.1f%%",
+		attr2.AgentLines, attr2.HumanAdded, attr2.HumanModified, attr2.HumanRemoved,
+		attr2.TotalCommitted, attr2.AgentPercentage)
+
+	// The second commit only adds agent lines to main.go.
+	// utils.go (50 lines) was committed BEFORE the second cycle.
+	//
+	// CORRECT (AttributionBaseCommit = unrelated commit):
+	//   human_added = 0, agent_lines ≈ 3-4, agent_percentage = 100%
+	//
+	// BUG (AttributionBaseCommit = first commit, stale):
+	//   human_added = 50+ (utils.go lines incorrectly counted as user work)
+	//   agent_percentage ≈ 6% (inflated denominator)
+
+	if attr2.HumanAdded != 0 {
+		t.Errorf("HumanAdded = %d, want 0 (utils.go was committed before this cycle; stale AttributionBaseCommit?)",
+			attr2.HumanAdded)
+	}
+
+	if attr2.AgentLines <= 0 {
+		t.Errorf("AgentLines = %d, should be > 0", attr2.AgentLines)
+	}
+
+	if attr2.AgentPercentage != 100 {
+		t.Errorf("AgentPercentage = %.1f%%, want 100%% (only agent lines in this commit)",
+			attr2.AgentPercentage)
 	}
 }
 
