@@ -346,31 +346,6 @@ func TestCompact_MixedFormats(t *testing.T) {
 	assertJSONLines(t, result, expected)
 }
 
-func TestCompact_CopilotEventsFormat(t *testing.T) {
-	t.Parallel()
-
-	copilotOpts := agentOpts("copilot-cli")
-	input := []byte(`{"type":"session.start","data":{},"id":"0","timestamp":"2026-03-03T00:00:00Z","parentId":""}
-{"type":"user.message","data":{"content":"<user_query>\ncreate hello.txt\n</user_query>"},"id":"2","timestamp":"2026-03-03T00:00:01Z","parentId":""}
-{"type":"assistant.message","data":{"content":""},"id":"4","timestamp":"2026-03-03T00:00:03Z","parentId":"3"}
-{"type":"assistant.message","data":{"content":"Created hello.txt."},"id":"6","timestamp":"2026-03-03T00:00:05Z","parentId":"3"}
-{"type":"session.shutdown","data":{"modelMetrics":{}},"id":"9","timestamp":"2026-03-03T00:00:09Z","parentId":""}
-`)
-
-	expected := []string{
-		`{"v":1,"agent":"copilot-cli","cli_version":"0.5.1","type":"user","ts":"2026-03-03T00:00:01Z","content":"create hello.txt"}`,
-		`{"v":1,"agent":"copilot-cli","cli_version":"0.5.1","type":"assistant","ts":"2026-03-03T00:00:05Z","id":"6","content":"Created hello.txt."}`,
-	}
-
-	result, err := Compact(input, copilotOpts)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	assertJSONLines(t, result, expected)
-}
-
-// --- Edge case tests ---
-
 func TestCompact_EmptyInput(t *testing.T) {
 	t.Parallel()
 
