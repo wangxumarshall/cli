@@ -164,7 +164,8 @@ func ToRelativePath(absPath, cwd string) string {
 	if err != nil || strings.HasPrefix(relPath, "..") {
 		return ""
 	}
-	return relPath
+	// Always use forward slashes for consistency with git paths.
+	return filepath.ToSlash(relPath)
 }
 
 // nonAlphanumericRegex matches any non-alphanumeric character
