@@ -489,6 +489,19 @@ func (s *EntireSettings) IsCheckpointsV2Enabled() bool {
 	return ok && val
 }
 
+// IsPushV2RefsEnabled checks if pushing v2 refs is enabled.
+// Requires both checkpoints_v2 and push_v2_refs to be true.
+func (s *EntireSettings) IsPushV2RefsEnabled() bool {
+	if !s.IsCheckpointsV2Enabled() {
+		return false
+	}
+	if s.StrategyOptions == nil {
+		return false
+	}
+	val, ok := s.StrategyOptions["push_v2_refs"].(bool)
+	return ok && val
+}
+
 // IsPushSessionsDisabled checks if push_sessions is disabled in settings.
 // Returns true if push_sessions is explicitly set to false.
 func (s *EntireSettings) IsPushSessionsDisabled() bool {
