@@ -26,7 +26,7 @@ func (s *V2GitStore) ReadCommitted(ctx context.Context, checkpointID id.Checkpoi
 	}
 
 	refName := plumbing.ReferenceName(paths.V2MainRefName)
-	_, rootTreeHash, err := s.getRefState(refName)
+	_, rootTreeHash, err := s.GetRefState(refName)
 	if err != nil {
 		return nil, nil //nolint:nilnil,nilerr // Ref doesn't exist means no checkpoint
 	}
@@ -71,7 +71,7 @@ func (s *V2GitStore) ReadSessionContent(ctx context.Context, checkpointID id.Che
 	}
 
 	refName := plumbing.ReferenceName(paths.V2MainRefName)
-	_, rootTreeHash, err := s.getRefState(refName)
+	_, rootTreeHash, err := s.GetRefState(refName)
 	if err != nil {
 		return nil, ErrCheckpointNotFound
 	}
@@ -138,7 +138,7 @@ func (s *V2GitStore) readTranscriptFromFullRefs(ctx context.Context, checkpointI
 		return transcript, nil
 	}
 
-	archived, err := s.listArchivedGenerations()
+	archived, err := s.ListArchivedGenerations()
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +159,7 @@ func (s *V2GitStore) readTranscriptFromFullRefs(ctx context.Context, checkpointI
 // When chunk files exist, all chunks (including chunk 0) are reassembled using
 // agent-aware reassembly via agent.ReassembleTranscript.
 func (s *V2GitStore) readTranscriptFromRef(refName plumbing.ReferenceName, sessionPath string, agentType types.AgentType) ([]byte, error) {
-	_, rootTreeHash, err := s.getRefState(refName)
+	_, rootTreeHash, err := s.GetRefState(refName)
 	if err != nil {
 		return nil, err
 	}

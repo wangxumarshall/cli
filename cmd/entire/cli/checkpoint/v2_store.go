@@ -69,8 +69,8 @@ func (s *V2GitStore) ensureRef(refName plumbing.ReferenceName) error {
 	return nil
 }
 
-// getRefState returns the parent commit hash and root tree hash for a ref.
-func (s *V2GitStore) getRefState(refName plumbing.ReferenceName) (parentHash, treeHash plumbing.Hash, err error) {
+// GetRefState returns the parent commit hash and root tree hash for a ref.
+func (s *V2GitStore) GetRefState(refName plumbing.ReferenceName) (parentHash, treeHash plumbing.Hash, err error) {
 	ref, err := s.repo.Reference(refName, true)
 	if err != nil {
 		return plumbing.ZeroHash, plumbing.ZeroHash, fmt.Errorf("ref %s not found: %w", refName, err)

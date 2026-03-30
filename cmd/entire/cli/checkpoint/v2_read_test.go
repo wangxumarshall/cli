@@ -159,7 +159,7 @@ func TestV2ReadSessionContent_ChunkedTranscript(t *testing.T) {
 	err = v2Store.ensureRef(refName)
 	require.NoError(t, err)
 
-	_, rootTreeHash, err := v2Store.getRefState(refName)
+	_, rootTreeHash, err := v2Store.GetRefState(refName)
 	require.NoError(t, err)
 
 	sessionPath := cpID.Path() + "/0/"
@@ -186,7 +186,7 @@ func TestV2ReadSessionContent_ChunkedTranscript(t *testing.T) {
 	newTreeHash, err := v2Store.gs.spliceCheckpointSubtree(rootTreeHash, cpID, cpID.Path()+"/", entries)
 	require.NoError(t, err)
 
-	parentHash, _, err := v2Store.getRefState(refName)
+	parentHash, _, err := v2Store.GetRefState(refName)
 	require.NoError(t, err)
 	err = v2Store.updateRef(refName, newTreeHash, parentHash, "chunked test", "Test", "test@test.com")
 	require.NoError(t, err)

@@ -120,7 +120,7 @@ func TestV2GitStore_GetRefState_ReturnsParentAndTree(t *testing.T) {
 	refName := plumbing.ReferenceName(paths.V2MainRefName)
 	require.NoError(t, store.ensureRef(refName))
 
-	parentHash, treeHash, err := store.getRefState(refName)
+	parentHash, treeHash, err := store.GetRefState(refName)
 	require.NoError(t, err)
 	require.NotEqual(t, plumbing.ZeroHash, parentHash, "parent hash should be non-zero")
 	// Tree hash can be zero hash for empty tree or a valid hash — just verify no error
@@ -133,7 +133,7 @@ func TestV2GitStore_GetRefState_ErrorsOnMissingRef(t *testing.T) {
 	store := NewV2GitStore(repo)
 
 	refName := plumbing.ReferenceName("refs/entire/nonexistent")
-	_, _, err := store.getRefState(refName)
+	_, _, err := store.GetRefState(refName)
 	require.Error(t, err)
 }
 
@@ -145,7 +145,7 @@ func TestV2GitStore_UpdateRef_CreatesCommit(t *testing.T) {
 	refName := plumbing.ReferenceName(paths.V2MainRefName)
 	require.NoError(t, store.ensureRef(refName))
 
-	parentHash, treeHash, err := store.getRefState(refName)
+	parentHash, treeHash, err := store.GetRefState(refName)
 	require.NoError(t, err)
 
 	// Build a tree with one file
@@ -740,19 +740,23 @@ func TestWriteCommitted_TriggersRotationAtThreshold(t *testing.T) {
 	}
 
 	// Verify an archived generation exists
-	archived, err := store.listArchivedGenerations()
+	archived, err := store.ListArchivedGenerations()
 	require.NoError(t, err)
 	assert.Len(t, archived, 1, "one archived generation should exist after rotation")
 
-	// Verify /full/current is now a fresh generation
-	gen, err := store.readGenerationFromRef(plumbing.ReferenceName(paths.V2FullCurrentRefName))
+	// Verify /full/current is now a fresh generation (empty tree, no generation.json)
+	_, freshTreeHash, err := store.GetRefState(plumbing.ReferenceName(paths.V2FullCurrentRefName))
 	require.NoError(t, err)
-	assert.Empty(t, gen.Checkpoints, "fresh /full/current should have no checkpoints")
+	freshCount, err := store.CountCheckpointsInTree(freshTreeHash)
+	require.NoError(t, err)
+	assert.Equal(t, 0, freshCount, "fresh /full/current should have no checkpoints")
 
 	// Verify the archived generation has 3 checkpoints
-	archiveGen, err := store.readGenerationFromRef(plumbing.ReferenceName(paths.V2FullRefPrefix + archived[0]))
+	_, archiveTreeHash, err := store.GetRefState(plumbing.ReferenceName(paths.V2FullRefPrefix + archived[0]))
 	require.NoError(t, err)
-	assert.Len(t, archiveGen.Checkpoints, 3)
+	archiveCount, err := store.CountCheckpointsInTree(archiveTreeHash)
+	require.NoError(t, err)
+	assert.Equal(t, 3, archiveCount)
 
 	// Write a 4th checkpoint — should land on the fresh /full/current
 	cpID4 := id.MustCheckpointID("000000000004")
@@ -767,10 +771,11 @@ func TestWriteCommitted_TriggersRotationAtThreshold(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	gen, err = store.readGenerationFromRef(plumbing.ReferenceName(paths.V2FullCurrentRefName))
+	_, newTreeHash, err := store.GetRefState(plumbing.ReferenceName(paths.V2FullCurrentRefName))
 	require.NoError(t, err)
-	assert.Len(t, gen.Checkpoints, 1, "new checkpoint should be on fresh generation")
-	assert.Equal(t, cpID4, gen.Checkpoints[0])
+	newCount, err := store.CountCheckpointsInTree(newTreeHash)
+	require.NoError(t, err)
+	assert.Equal(t, 1, newCount, "new checkpoint should be on fresh generation")
 }
 
 func TestWriteCommitted_NoRotationBelowThreshold(t *testing.T) {
@@ -796,11 +801,13 @@ func TestWriteCommitted_NoRotationBelowThreshold(t *testing.T) {
 	}
 
 	// No rotation should have occurred
-	archived, err := store.listArchivedGenerations()
+	archived, err := store.ListArchivedGenerations()
 	require.NoError(t, err)
 	assert.Empty(t, archived, "no archived generations should exist below threshold")
 
-	gen, err := store.readGenerationFromRef(plumbing.ReferenceName(paths.V2FullCurrentRefName))
+	_, noRotTreeHash, err := store.GetRefState(plumbing.ReferenceName(paths.V2FullCurrentRefName))
 	require.NoError(t, err)
-	assert.Len(t, gen.Checkpoints, 3)
+	noRotCount, err := store.CountCheckpointsInTree(noRotTreeHash)
+	require.NoError(t, err)
+	assert.Equal(t, 3, noRotCount)
 }
