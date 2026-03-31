@@ -343,7 +343,7 @@ func resolveLatestCheckpoint(ctx context.Context, checkpointIDs []id.CheckpointI
 // are invisible to the repo opened before the fetch). To avoid this, each
 // attempt opens a fresh repo after the fetch succeeds.
 //
-// Fallback order: treeless fetch → local → full fetch → remote tree.
+// Fallback order: treeless fetch → local → checkpoint_remote → full origin fetch → remote tree.
 func getMetadataTree(ctx context.Context) (*object.Tree, *git.Repository, error) {
 	logCtx := logging.WithComponent(ctx, "resume.getMetadataTree")
 
@@ -402,8 +402,8 @@ func getMetadataTree(ctx context.Context) (*object.Tree, *git.Repository, error)
 		)
 	}
 
-	// Try checkpoint_remote first if configured (checkpoints may live in a separate repo,
-	// so fetching from origin would be unnecessary latency)
+	// Try checkpoint_remote if configured. Checkpoints may live in a separate repo,
+	// so this avoids a potentially unnecessary full origin fetch.
 	if fetchErr := FetchMetadataFromCheckpointRemote(ctx); fetchErr == nil {
 		freshRepo, freshErr := openRepository(ctx)
 		if freshErr == nil {
