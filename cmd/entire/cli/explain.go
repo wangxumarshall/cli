@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -1335,7 +1336,11 @@ func outputWithPager(w io.Writer, content string) {
 		if lineCount > height-2 {
 			pager := os.Getenv("PAGER")
 			if pager == "" {
-				pager = "less"
+				if runtime.GOOS == "windows" {
+					pager = "more"
+				} else {
+					pager = "less"
+				}
 			}
 
 			// Use context.Background() intentionally — pagers are interactive

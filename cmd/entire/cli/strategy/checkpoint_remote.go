@@ -329,11 +329,13 @@ func FetchMetadataBranch(ctx context.Context, remoteURL string) error {
 
 	tmpRef := "refs/entire-fetch-tmp/" + branchName
 	refSpec := fmt.Sprintf("+refs/heads/%s:%s", branchName, tmpRef)
-	fetchCmd := exec.CommandContext(fetchCtx, "git", "fetch", "--no-tags", remoteURL, refSpec)
-	fetchCmd.Stdin = nil
-	fetchCmd.Env = append(os.Environ(),
-		"GIT_TERMINAL_PROMPT=0",
-	)
+	fetchCmd := CheckpointGitCommand(fetchCtx, remoteURL, "fetch", "--no-tags", remoteURL, refSpec)
+	// Merge GIT_TERMINAL_PROMPT=0 into whatever env CheckpointGitCommand set.
+	// If the token was injected, cmd.Env is already populated; otherwise use os.Environ().
+	if fetchCmd.Env == nil {
+		fetchCmd.Env = os.Environ()
+	}
+	fetchCmd.Env = append(fetchCmd.Env, "GIT_TERMINAL_PROMPT=0")
 	if output, err := fetchCmd.CombinedOutput(); err != nil {
 		// Include redacted output for diagnostics without leaking credentials.
 		// Git stderr may echo the URL with embedded credentials, so replace it.
