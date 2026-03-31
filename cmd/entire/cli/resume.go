@@ -399,29 +399,8 @@ func getMetadataTree(ctx context.Context) (*object.Tree, *git.Repository, error)
 		)
 	}
 
-	// Fallback: full fetch from remote
-	if fetchErr := FetchMetadataBranch(ctx); fetchErr == nil {
-		freshRepo, repoErr := openRepository(ctx)
-		if repoErr == nil {
-			logRefHash(freshRepo, "full-fetch")
-			metadataTree, treeErr := strategy.GetMetadataBranchTree(freshRepo)
-			if treeErr == nil {
-				logging.Debug(logCtx, "metadata tree obtained via full fetch",
-					slog.String("tree_hash", metadataTree.Hash.String()),
-				)
-				return metadataTree, freshRepo, nil
-			}
-			logging.Debug(logCtx, "full fetch succeeded but tree read failed",
-				slog.String("error", treeErr.Error()),
-			)
-		}
-	} else {
-		logging.Debug(logCtx, "full fetch failed",
-			slog.String("error", fetchErr.Error()),
-		)
-	}
-
-	// Try checkpoint_remote if configured (checkpoints may live in a separate repo)
+	// Try checkpoint_remote first if configured (checkpoints may live in a separate repo,
+	// so fetching from origin would be unnecessary latency)
 	if fetchErr := FetchMetadataFromCheckpointRemote(ctx); fetchErr == nil {
 		freshRepo, freshErr := openRepository(ctx)
 		if freshErr == nil {
@@ -439,6 +418,28 @@ func getMetadataTree(ctx context.Context) (*object.Tree, *git.Repository, error)
 		}
 	} else {
 		logging.Debug(logCtx, "checkpoint remote fetch failed or not configured",
+			slog.String("error", fetchErr.Error()),
+		)
+	}
+
+	// Fallback: full fetch from origin
+	if fetchErr := FetchMetadataBranch(ctx); fetchErr == nil {
+		freshRepo, repoErr := openRepository(ctx)
+		if repoErr == nil {
+			logRefHash(freshRepo, "full-fetch")
+			metadataTree, treeErr := strategy.GetMetadataBranchTree(freshRepo)
+			if treeErr == nil {
+				logging.Debug(logCtx, "metadata tree obtained via full fetch",
+					slog.String("tree_hash", metadataTree.Hash.String()),
+				)
+				return metadataTree, freshRepo, nil
+			}
+			logging.Debug(logCtx, "full fetch succeeded but tree read failed",
+				slog.String("error", treeErr.Error()),
+			)
+		}
+	} else {
+		logging.Debug(logCtx, "full fetch failed",
 			slog.String("error", fetchErr.Error()),
 		)
 	}
