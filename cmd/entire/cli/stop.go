@@ -39,9 +39,7 @@ Examples:
 
 			// Check if in git repository
 			if _, err := paths.WorktreeRoot(ctx); err != nil {
-				cmd.SilenceUsage = true
-				fmt.Fprintln(cmd.ErrOrStderr(), "Not a git repository.")
-				return NewSilentError(errors.New("not a git repository"))
+				return errors.New("not a git repository")
 			}
 
 			return runStop(ctx, cmd, sessionFlag, allFlag, forceFlag)
