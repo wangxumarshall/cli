@@ -644,12 +644,21 @@ func checkRemoteMetadata(ctx context.Context, w, errW io.Writer, checkpointID id
 	if hasCheckpointRemote && resolveErr == nil {
 		if fetchErr := strategy.FetchMetadataBranch(ctx, checkpointURL); fetchErr == nil {
 			freshRepo, freshErr := openRepository(ctx)
-			if freshErr == nil {
-				if metadataTree, treeErr := strategy.GetMetadataBranchTree(freshRepo); treeErr == nil {
-					if metadata, err := tryReadCheckpointFromTree(ctx, metadataTree, freshRepo, checkpointID); err == nil {
-						return resumeSession(ctx, w, errW, metadata, false)
-					}
-				}
+			if freshErr != nil {
+				logging.Debug(logCtx, "checkpoint remote: open repository failed after fetch",
+					slog.String("error", freshErr.Error()),
+				)
+			} else if metadataTree, treeErr := strategy.GetMetadataBranchTree(freshRepo); treeErr != nil {
+				logging.Debug(logCtx, "checkpoint remote: fetch succeeded but tree read failed",
+					slog.String("error", treeErr.Error()),
+				)
+			} else if metadata, err := tryReadCheckpointFromTree(ctx, metadataTree, freshRepo, checkpointID); err != nil {
+				logging.Debug(logCtx, "checkpoint remote: tree read succeeded but checkpoint metadata read failed",
+					slog.String("checkpoint_id", checkpointID.String()),
+					slog.String("error", err.Error()),
+				)
+			} else {
+				return resumeSession(ctx, w, errW, metadata, false)
 			}
 		} else {
 			logging.Debug(logCtx, "checkpoint remote fetch failed",
