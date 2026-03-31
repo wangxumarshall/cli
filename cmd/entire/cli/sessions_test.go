@@ -111,7 +111,7 @@ func TestStopCmd_SingleSession_WithCheckpoint(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
-	cmd.SetArgs([]string{"--session", "test-stop-checkpoint-1", "--force"})
+	cmd.SetArgs([]string{"test-stop-checkpoint-1", "--force"})
 
 	err := cmd.ExecuteContext(context.Background())
 	if err != nil {
@@ -137,7 +137,7 @@ func TestStopCmd_SingleSession_UncommittedWork(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
-	cmd.SetArgs([]string{"--session", "test-stop-uncommitted-1", "--force"})
+	cmd.SetArgs([]string{"test-stop-uncommitted-1", "--force"})
 
 	err := cmd.ExecuteContext(context.Background())
 	if err != nil {
@@ -164,7 +164,7 @@ func TestStopCmd_AlreadyStopped(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
-	cmd.SetArgs([]string{"--session", "test-stop-already-ended-1", "--force"})
+	cmd.SetArgs([]string{"test-stop-already-ended-1", "--force"})
 
 	err := cmd.ExecuteContext(context.Background())
 	if err != nil {
@@ -204,7 +204,7 @@ func TestStopCmd_SessionFlag(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
-	cmd.SetArgs([]string{"--session", "test-stop-target-session", "--force"})
+	cmd.SetArgs([]string{"test-stop-target-session", "--force"})
 
 	err := cmd.ExecuteContext(context.Background())
 	if err != nil {
@@ -361,11 +361,11 @@ func TestStopCmd_AllAndSessionMutuallyExclusive(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
-	cmd.SetArgs([]string{"--all", "--session", "test-stop-mutex-sess", "--force"})
+	cmd.SetArgs([]string{"--all", "--force", "test-stop-mutex-sess"})
 
 	err := cmd.ExecuteContext(context.Background())
 	if err == nil {
-		t.Fatal("expected error for --all and --session together, got nil")
+		t.Fatal("expected error for --all and session ID together, got nil")
 	}
 	if !strings.Contains(err.Error(), "mutually exclusive") {
 		t.Errorf("expected error to mention 'mutually exclusive', got: %v", err)
@@ -391,7 +391,7 @@ func TestStopCmd_SessionNotFound(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
-	cmd.SetArgs([]string{"--session", "doesnotexist", "--force"})
+	cmd.SetArgs([]string{"doesnotexist", "--force"})
 
 	err := cmd.ExecuteContext(context.Background())
 	if err == nil {
@@ -489,7 +489,7 @@ func TestStopCmd_AlreadyStopped_EndedAtOnly(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
-	cmd.SetArgs([]string{"--session", "test-stop-ended-at-only", "--force"})
+	cmd.SetArgs([]string{"test-stop-ended-at-only", "--force"})
 
 	err := cmd.ExecuteContext(context.Background())
 	if err != nil {

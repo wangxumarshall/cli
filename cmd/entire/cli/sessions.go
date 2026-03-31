@@ -24,12 +24,11 @@ func newSessionsCmd() *cobra.Command {
 }
 
 func newStopCmd() *cobra.Command {
-	var sessionFlag string
 	var allFlag bool
 	var forceFlag bool
 
 	cmd := &cobra.Command{
-		Use:   "stop",
+		Use:   "stop [session-id]",
 		Short: "Stop one or more active sessions",
 		Long: `Mark one or more active sessions as ended.
 
@@ -38,14 +37,20 @@ so no condensation or checkpoint-writing occurs. To flush pending work, commit f
 
 Examples:
   entire sessions stop                     No sessions: exits. One session: confirm and stop. Multiple: show selector
-  entire sessions stop --session <id>      Stop a specific session by ID
+  entire sessions stop <session-id>        Stop a specific session by ID
   entire sessions stop --all               Stop all active sessions in current worktree
   entire sessions stop --force             Skip confirmation prompt`,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 
-			if allFlag && sessionFlag != "" {
-				return errors.New("--all and --session are mutually exclusive")
+			var sessionID string
+			if len(args) > 0 {
+				sessionID = args[0]
+			}
+
+			if allFlag && sessionID != "" {
+				return errors.New("--all and session ID argument are mutually exclusive")
 			}
 
 			// Check if in git repository
@@ -53,11 +58,10 @@ Examples:
 				return errors.New("not a git repository")
 			}
 
-			return runStop(ctx, cmd, sessionFlag, allFlag, forceFlag)
+			return runStop(ctx, cmd, sessionID, allFlag, forceFlag)
 		},
 	}
 
-	cmd.Flags().StringVar(&sessionFlag, "session", "", "Stop a specific session by ID (not scoped to current worktree)")
 	cmd.Flags().BoolVar(&allFlag, "all", false, "Stop all active sessions in current worktree")
 	cmd.Flags().BoolVarP(&forceFlag, "force", "f", false, "Skip confirmation prompt")
 
