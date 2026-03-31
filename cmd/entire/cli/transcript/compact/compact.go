@@ -76,17 +76,21 @@ type userTextBlock struct {
 //	{"v":1,"agent":"claude-code","cli_version":"0.42.0","type":"user","ts":"...","content":"..."}
 //	{"v":1,"agent":"claude-code","cli_version":"0.42.0","type":"assistant","ts":"...","id":"msg_xxx","content":[{"type":"text","text":"..."},{"type":"tool_use","id":"...","name":"...","input":{...},"result":{"output":"...","status":"..."}}]}
 func Compact(content []byte, opts MetadataFields) ([]byte, error) {
+	// Single-object formats (OpenCode, Gemini) must be detected on the raw
+	// content. SliceFromLine operates on newline offsets which would cut a
+	// JSON object mid-value and break parsing. These compactors handle
+	// StartLine internally as a message-index offset.
+	if isOpenCodeFormat(content) {
+		return compactOpenCode(content, opts)
+	}
+
+	if isGeminiFormat(content) {
+		return compactGemini(content, opts)
+	}
+
 	truncated := transcript.SliceFromLine(content, opts.StartLine)
 	if truncated == nil {
 		truncated = []byte{}
-	}
-
-	if isOpenCodeFormat(truncated) {
-		return compactOpenCode(truncated, opts)
-	}
-
-	if isGeminiFormat(truncated) {
-		return compactGemini(truncated, opts)
 	}
 
 	return compactJSONL(truncated, opts)

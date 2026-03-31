@@ -84,6 +84,8 @@ type geminiToolResult struct {
 }
 
 // compactGemini converts a full Gemini session JSON into transcript lines.
+// opts.StartLine is treated as a message-index offset (not a newline offset)
+// because the Gemini transcript is a single JSON object.
 func compactGemini(content []byte, opts MetadataFields) ([]byte, error) {
 	var session struct {
 		Messages []geminiMessage `json:"messages"`
@@ -92,10 +94,18 @@ func compactGemini(content []byte, opts MetadataFields) ([]byte, error) {
 		return nil, fmt.Errorf("parsing gemini session: %w", err)
 	}
 
+	messages := session.Messages
+	if opts.StartLine > 0 {
+		if opts.StartLine >= len(messages) {
+			return []byte{}, nil
+		}
+		messages = messages[opts.StartLine:]
+	}
+
 	base := newTranscriptLine(opts)
 	var result []byte
 
-	for _, msg := range session.Messages {
+	for _, msg := range messages {
 		if geminiDroppedTypes[msg.Type] {
 			continue
 		}
