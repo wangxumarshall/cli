@@ -129,7 +129,7 @@ func fetchAndMergeRef(ctx context.Context, target string, refName plumbing.Refer
 	}
 
 	// Check for rotation conflict on /full/current
-	if string(refName) == paths.V2FullCurrentRefName {
+	if refName == plumbing.ReferenceName(paths.V2FullCurrentRefName) {
 		remoteOnlyArchives, detectErr := detectRemoteOnlyArchives(ctx, target, repo)
 		if detectErr == nil && len(remoteOnlyArchives) > 0 {
 			err := handleRotationConflict(ctx, target, repo, refName, tmpRefName, remoteOnlyArchives)
