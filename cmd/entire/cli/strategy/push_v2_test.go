@@ -77,7 +77,7 @@ func TestPushRefIfNeeded_LocalBareRepo_PushesSuccessfully(t *testing.T) {
 	require.NoError(t, initCmd.Run())
 
 	err := pushRefIfNeeded(ctx, bareDir, plumbing.ReferenceName(paths.V2MainRefName))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Verify ref exists in bare repo
 	bareRepo, err := git.PlainOpen(bareDir)
@@ -248,13 +248,13 @@ func TestPushV2Refs_PushesAllRefs(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = bareRepo.Reference(plumbing.ReferenceName(paths.V2MainRefName), true)
-	assert.NoError(t, err, "/main ref should exist in bare repo")
+	require.NoError(t, err, "/main ref should exist in bare repo")
 
 	_, err = bareRepo.Reference(plumbing.ReferenceName(paths.V2FullCurrentRefName), true)
-	assert.NoError(t, err, "/full/current ref should exist in bare repo")
+	require.NoError(t, err, "/full/current ref should exist in bare repo")
 
 	_, err = bareRepo.Reference(plumbing.ReferenceName(paths.V2FullRefPrefix+"0000000000002"), true)
-	assert.NoError(t, err, "latest archived generation should exist in bare repo")
+	require.NoError(t, err, "latest archived generation should exist in bare repo")
 
 	_, err = bareRepo.Reference(plumbing.ReferenceName(paths.V2FullRefPrefix+"0000000000001"), true)
 	assert.Error(t, err, "older archived generation should NOT be pushed")
@@ -376,11 +376,11 @@ func TestFetchAndMergeRef_RotationConflict(t *testing.T) {
 
 	// Check that the local-only checkpoint (ffeeddccbbaa) is in the archive
 	_, err = archiveTree.Tree("ff/eeddccbbaa")
-	assert.NoError(t, err, "archived generation should contain local-only checkpoint ffeeddccbbaa")
+	require.NoError(t, err, "archived generation should contain local-only checkpoint ffeeddccbbaa")
 
 	// Check that the shared checkpoint (aabbccddeeff) is also there
 	_, err = archiveTree.Tree("aa/bbccddeeff")
-	assert.NoError(t, err, "archived generation should contain shared checkpoint aabbccddeeff")
+	require.NoError(t, err, "archived generation should contain shared checkpoint aabbccddeeff")
 
 	// Check that the remote checkpoint (112233445566) is also there
 	_, err = archiveTree.Tree("11/2233445566")
