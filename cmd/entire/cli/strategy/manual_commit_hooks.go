@@ -28,6 +28,7 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/stringutil"
 	"github.com/entireio/cli/cmd/entire/cli/trailers"
 	"github.com/entireio/cli/perf"
+	"github.com/entireio/cli/redact"
 
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
@@ -2314,6 +2315,22 @@ func (s *ManualCommitStrategy) finalizeAllTurnCheckpoints(ctx context.Context, s
 	prompts := readPromptsFromShadowBranch(ctx, repo, state)
 	if len(prompts) == 0 {
 		prompts = readPromptsFromFilesystem(ctx, state.SessionID)
+	}
+
+	// Redact secrets before writing — matches WriteCommitted behavior.
+	// The live transcript on disk contains raw content; redaction must happen
+	// before anything is persisted to the metadata branch.
+	fullTranscript, err = redact.JSONLBytes(fullTranscript)
+	if err != nil {
+		logging.Warn(logCtx, "finalize: transcript redaction failed, skipping",
+			slog.String("session_id", state.SessionID),
+			slog.String("error", err.Error()),
+		)
+		state.TurnCheckpointIDs = nil
+		return 1 // Count as error - all checkpoints will be skipped
+	}
+	for i, p := range prompts {
+		prompts[i] = redact.String(p)
 	}
 
 	store := checkpoint.NewGitStore(repo)
