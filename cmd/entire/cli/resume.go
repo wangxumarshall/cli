@@ -512,6 +512,13 @@ func getV2MetadataTree(ctx context.Context) (*object.Tree, *git.Repository, erro
 		if localErr == nil {
 			return tree, repo, nil
 		}
+		logging.Debug(ctx, "v2 checkpoint remote fetch succeeded but tree read failed",
+			slog.String("error", localErr.Error()),
+		)
+	} else {
+		logging.Debug(ctx, "v2 checkpoint remote fetch skipped or failed",
+			slog.String("error", fetchErr.Error()),
+		)
 	}
 
 	return nil, nil, fmt.Errorf("v2 metadata tree: %w", err)
