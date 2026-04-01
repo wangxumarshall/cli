@@ -35,6 +35,12 @@ Examples:
   entire sessions info <session-id>        Show session details
   entire sessions info <session-id> --json Output as JSON
   entire sessions stop                     Interactive stop`,
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			if _, err := paths.WorktreeRoot(cmd.Context()); err != nil {
+				return errors.New("not a git repository")
+			}
+			return nil
+		},
 	}
 
 	cmd.AddCommand(newListCmd())
@@ -72,11 +78,6 @@ Examples:
 
 			if allFlag && sessionID != "" {
 				return errors.New("--all and session ID argument are mutually exclusive")
-			}
-
-			// Check if in git repository
-			if _, err := paths.WorktreeRoot(ctx); err != nil {
-				return errors.New("not a git repository")
 			}
 
 			return runStop(ctx, cmd, sessionID, allFlag, forceFlag)
@@ -180,13 +181,7 @@ For active sessions only, use 'entire status'.
 Examples:
   entire sessions list    List all sessions across all worktrees`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := cmd.Context()
-
-			if _, err := paths.WorktreeRoot(ctx); err != nil {
-				return errors.New("not a git repository")
-			}
-
-			return runSessionList(ctx, cmd)
+			return runSessionList(cmd.Context(), cmd)
 		},
 	}
 
@@ -298,13 +293,7 @@ Examples:
   entire sessions info <session-id> --json`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := cmd.Context()
-
-			if _, err := paths.WorktreeRoot(ctx); err != nil {
-				return errors.New("not a git repository")
-			}
-
-			return runSessionInfo(ctx, cmd, args[0], jsonFlag)
+			return runSessionInfo(cmd.Context(), cmd, args[0], jsonFlag)
 		},
 	}
 

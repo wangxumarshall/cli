@@ -421,11 +421,11 @@ func TestStopCmd_NotGitRepo(t *testing.T) {
 	paths.ClearWorktreeRootCache()
 	session.ClearGitCommonDirCache()
 
-	cmd := newStopCmd()
+	cmd := newSessionsCmd()
 	var stdout, stderr bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
-	cmd.SetArgs([]string{})
+	cmd.SetArgs([]string{"stop"})
 
 	err := cmd.ExecuteContext(context.Background())
 	if err == nil {
@@ -703,10 +703,10 @@ func TestListCmd_NotGitRepo(t *testing.T) {
 	paths.ClearWorktreeRootCache()
 	session.ClearGitCommonDirCache()
 
-	cmd := newListCmd()
+	cmd := newSessionsCmd()
 	var stdout bytes.Buffer
 	cmd.SetOut(&stdout)
-	cmd.SetArgs([]string{})
+	cmd.SetArgs([]string{"list"})
 
 	err := cmd.ExecuteContext(context.Background())
 	if err == nil {
@@ -911,11 +911,11 @@ func TestInfoCmd_NotGitRepo(t *testing.T) {
 	paths.ClearWorktreeRootCache()
 	session.ClearGitCommonDirCache()
 
-	cmd := newInfoCmd()
+	cmd := newSessionsCmd()
 	var stdout, stderr bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
-	cmd.SetArgs([]string{"some-id"})
+	cmd.SetArgs([]string{"info", "some-id"})
 
 	err := cmd.ExecuteContext(context.Background())
 	if err == nil {
