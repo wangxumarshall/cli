@@ -493,6 +493,24 @@ func FetchV2MainRef(ctx context.Context) error {
 	return nil
 }
 
+// FetchV2MetadataFromCheckpointRemote fetches the v2 /main ref from the
+// configured checkpoint_remote URL.
+// Returns an error if the fetch fails or no checkpoint_remote is configured.
+func FetchV2MetadataFromCheckpointRemote(ctx context.Context) error {
+	checkpointURL, hasCheckpointRemote, resolveErr := strategy.ResolveCheckpointRemoteURL(ctx)
+	if !hasCheckpointRemote {
+		return errors.New("no checkpoint_remote configured")
+	}
+	if resolveErr != nil {
+		return fmt.Errorf("checkpoint_remote configured but could not resolve URL: %w", resolveErr)
+	}
+
+	if err := strategy.FetchV2MainFromURL(ctx, checkpointURL); err != nil {
+		return fmt.Errorf("failed to fetch v2 /main from checkpoint remote: %w", err)
+	}
+	return nil
+}
+
 // FetchMetadataFromCheckpointRemote fetches the entire/checkpoints/v1 branch from the
 // configured checkpoint_remote URL and updates the local branch.
 // Returns an error if the fetch fails or no checkpoint_remote is configured.

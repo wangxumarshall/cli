@@ -499,13 +499,22 @@ func getMetadataTree(ctx context.Context) (*object.Tree, *git.Repository, error)
 }
 
 // getV2MetadataTree resolves the v2 /main ref tree with the same
-// fetch fallback pattern as getMetadataTree.
+// fetch fallback pattern as getMetadataTree, including checkpoint remote support.
 func getV2MetadataTree(ctx context.Context) (*object.Tree, *git.Repository, error) {
 	tree, repo, err := checkpoint.GetV2MetadataTree(ctx, FetchV2MainTreeOnly, FetchV2MainRef, openRepository)
-	if err != nil {
-		return nil, nil, fmt.Errorf("v2 metadata tree: %w", err)
+	if err == nil {
+		return tree, repo, nil
 	}
-	return tree, repo, nil
+
+	// Try checkpoint remote if configured (fetch ref, then read locally)
+	if fetchErr := FetchV2MetadataFromCheckpointRemote(ctx); fetchErr == nil {
+		tree, repo, localErr := checkpoint.GetV2MetadataTree(ctx, nil, nil, openRepository)
+		if localErr == nil {
+			return tree, repo, nil
+		}
+	}
+
+	return nil, nil, fmt.Errorf("v2 metadata tree: %w", err)
 }
 
 // branchCheckpointsResult contains the result of searching for checkpoints on a branch.
