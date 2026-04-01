@@ -104,7 +104,7 @@ func runStop(ctx context.Context, cmd *cobra.Command, sessionID string, all, for
 
 	activeSessions := filterActiveSessions(states)
 
-	// --all path: stop all active sessions in current worktree (scoped inside runStopAll).
+	// --all path: stop all active sessions across all worktrees.
 	if all {
 		return runStopAll(ctx, cmd, activeSessions, force)
 	}
@@ -360,9 +360,13 @@ type tokenInfoJSON struct {
 }
 
 func writeSessionInfoJSON(w io.Writer, state *strategy.SessionState, status string) error {
+	agentLabel := string(state.AgentType)
+	if agentLabel == "" {
+		agentLabel = unknownPlaceholder
+	}
 	info := sessionInfoJSON{
 		SessionID:      state.SessionID,
-		Agent:          string(state.AgentType),
+		Agent:          agentLabel,
 		Model:          state.ModelName,
 		Status:         status,
 		WorktreeID:     state.WorktreeID,
@@ -544,10 +548,7 @@ func runStopMultiSelect(ctx context.Context, cmd *cobra.Command, activeSessions 
 		wt := sessionWorktreeLabel(s)
 		label := fmt.Sprintf("%s · %s · %s", s.AgentType, wt, s.SessionID)
 		if s.LastPrompt != "" {
-			prompt := s.LastPrompt
-			if len(prompt) > 40 {
-				prompt = prompt[:37] + "..."
-			}
+			prompt := stringutil.TruncateRunes(s.LastPrompt, 40, "...")
 			label = fmt.Sprintf("%s · %q", label, prompt)
 		}
 		options[i] = huh.NewOption(label, s.SessionID)
