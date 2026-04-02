@@ -339,7 +339,11 @@ func filterToUncommittedFiles(ctx context.Context, files []string, repoRoot stri
 			continue
 		}
 
-		if string(workingContent) != headContent {
+		// Normalize CRLF → LF so the comparison works on Windows where
+		// core.autocrlf converts line endings on checkout. Git blobs always
+		// store LF, but the working tree copy may have CRLF.
+		normalizedWorking := strings.ReplaceAll(string(workingContent), "\r\n", "\n")
+		if normalizedWorking != headContent {
 			// Working tree differs from HEAD — uncommitted changes
 			result = append(result, relPath)
 		}

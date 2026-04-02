@@ -29,6 +29,11 @@ func TestInteractiveMultiStep(t *testing.T) {
 		s.WaitFor(t, session, prompt, 60*time.Second)
 		testutil.AssertNewCommits(t, s, 1)
 
+		// Wait for the turn-end hook (including finalize) to complete before
+		// reading the checkpoint branch. The finalize step writes a second
+		// commit to entire/checkpoints/v1 concurrently with the test, and
+		// reading the branch mid-update can see a broken ref.
+		testutil.WaitForSessionIdle(t, s.Dir, 10*time.Second)
 		testutil.WaitForCheckpoint(t, s, 30*time.Second)
 		testutil.AssertCommitLinkedToCheckpoint(t, s.Dir, "HEAD")
 		testutil.WaitForNoShadowBranches(t, s.Dir, 10*time.Second)
