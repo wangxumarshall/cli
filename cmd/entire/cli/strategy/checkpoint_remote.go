@@ -154,10 +154,18 @@ func ResolveCheckpointURL(ctx context.Context, pushRemoteName string) string {
 	}
 	pushRemoteURL, err := getRemoteURL(ctx, pushRemoteName)
 	if err != nil {
+		logging.Debug(ctx, "checkpoint-remote: could not get push remote URL for v2 resolution",
+			slog.String("remote", pushRemoteName),
+			slog.String("error", err.Error()),
+		)
 		return ""
 	}
 	url, err := deriveCheckpointURL(pushRemoteURL, config)
 	if err != nil {
+		logging.Debug(ctx, "checkpoint-remote: could not derive v2 checkpoint URL",
+			slog.String("repo", config.Repo),
+			slog.String("error", err.Error()),
+		)
 		return ""
 	}
 	return url
