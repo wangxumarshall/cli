@@ -633,7 +633,9 @@ func (s *ManualCommitStrategy) RestoreLogsOnly(ctx context.Context, w, errW io.W
 
 	// Resolve which store has this checkpoint. Try v2 first when enabled.
 	// The chosen reader is used for all subsequent reads (summary + session content)
-	// to avoid mixed v1/v2 reads.
+	// to avoid mixed v1/v2 reads. No per-session fallback to v1: during dual-write,
+	// both stores receive the same data, so if v2 has the summary it also has the
+	// transcripts on /full/* refs.
 	var reader committedReader
 	var summary *cpkg.CheckpointSummary
 
