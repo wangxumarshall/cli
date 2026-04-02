@@ -463,7 +463,7 @@ func FetchV2MainTreeOnly(ctx context.Context) error {
 
 	refSpec := fmt.Sprintf("+%s:%s", paths.V2MainRefName, paths.V2MainRefName)
 
-	fetchCmd := exec.CommandContext(ctx, "git", "fetch", "--depth=1", "--filter=blob:none", "origin", refSpec)
+	fetchCmd := strategy.CheckpointGitCommand(ctx, "origin", "fetch", "--depth=1", "--filter=blob:none", "origin", refSpec)
 	if output, err := fetchCmd.CombinedOutput(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return errors.New("v2 treeless fetch timed out after 2 minutes")
@@ -482,7 +482,7 @@ func FetchV2MainRef(ctx context.Context) error {
 
 	refSpec := fmt.Sprintf("+%s:%s", paths.V2MainRefName, paths.V2MainRefName)
 
-	fetchCmd := exec.CommandContext(ctx, "git", "fetch", "origin", refSpec)
+	fetchCmd := strategy.CheckpointGitCommand(ctx, "origin", "fetch", "origin", refSpec)
 	if output, err := fetchCmd.CombinedOutput(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return errors.New("v2 fetch timed out after 2 minutes")
@@ -490,6 +490,24 @@ func FetchV2MainRef(ctx context.Context) error {
 		return fmt.Errorf("failed to fetch v2 /main from origin: %s: %w", strings.TrimSpace(string(output)), err)
 	}
 
+	return nil
+}
+
+// FetchV2MetadataFromCheckpointRemote fetches the v2 /main ref from the
+// configured checkpoint_remote URL.
+// Returns an error if the fetch fails or no checkpoint_remote is configured.
+func FetchV2MetadataFromCheckpointRemote(ctx context.Context) error {
+	checkpointURL, hasCheckpointRemote, resolveErr := strategy.ResolveCheckpointRemoteURL(ctx)
+	if !hasCheckpointRemote {
+		return errors.New("no checkpoint_remote configured")
+	}
+	if resolveErr != nil {
+		return fmt.Errorf("checkpoint_remote configured but could not resolve URL: %w", resolveErr)
+	}
+
+	if err := strategy.FetchV2MainFromURL(ctx, checkpointURL); err != nil {
+		return fmt.Errorf("failed to fetch v2 /main from checkpoint remote: %w", err)
+	}
 	return nil
 }
 

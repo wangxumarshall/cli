@@ -499,13 +499,29 @@ func getMetadataTree(ctx context.Context) (*object.Tree, *git.Repository, error)
 }
 
 // getV2MetadataTree resolves the v2 /main ref tree with the same
-// fetch fallback pattern as getMetadataTree.
+// fetch fallback pattern as getMetadataTree, including checkpoint remote support.
 func getV2MetadataTree(ctx context.Context) (*object.Tree, *git.Repository, error) {
 	tree, repo, err := checkpoint.GetV2MetadataTree(ctx, FetchV2MainTreeOnly, FetchV2MainRef, openRepository)
-	if err != nil {
-		return nil, nil, fmt.Errorf("v2 metadata tree: %w", err)
+	if err == nil {
+		return tree, repo, nil
 	}
-	return tree, repo, nil
+
+	// Try checkpoint remote if configured (fetch ref, then read locally)
+	if fetchErr := FetchV2MetadataFromCheckpointRemote(ctx); fetchErr == nil {
+		tree, repo, localErr := checkpoint.GetV2MetadataTree(ctx, nil, nil, openRepository)
+		if localErr == nil {
+			return tree, repo, nil
+		}
+		logging.Debug(ctx, "v2 checkpoint remote fetch succeeded but tree read failed",
+			slog.String("error", localErr.Error()),
+		)
+	} else {
+		logging.Debug(ctx, "v2 checkpoint remote fetch skipped or failed",
+			slog.String("error", fetchErr.Error()),
+		)
+	}
+
+	return nil, nil, fmt.Errorf("failed to get v2 metadata tree: %w", err)
 }
 
 // branchCheckpointsResult contains the result of searching for checkpoints on a branch.
@@ -681,7 +697,7 @@ func checkRemoteMetadata(ctx context.Context, w, errW io.Writer, checkpointID id
 				}
 				metadata, metaErr := strategy.ReadCheckpointMetadataFromSubtree(ft, checkpointID.Path())
 				if metaErr == nil {
-					return resumeSession(ctx, os.Stdout, os.Stderr, metadata, false)
+					return resumeSession(ctx, w, errW, metadata, false)
 				}
 			}
 		}

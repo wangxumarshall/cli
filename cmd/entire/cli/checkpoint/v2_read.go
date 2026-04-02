@@ -112,11 +112,7 @@ func (s *V2GitStore) ReadSessionContent(ctx context.Context, checkpointID id.Che
 
 	transcript, transcriptErr := s.readTranscriptFromFullRefs(ctx, checkpointID, sessionIndex, result.Metadata.Agent)
 	if transcriptErr != nil {
-		logging.Debug(ctx, "v2 raw transcript read failed",
-			slog.String("checkpoint_id", string(checkpointID)),
-			slog.Int("session_index", sessionIndex),
-			slog.String("error", transcriptErr.Error()),
-		)
+		return nil, fmt.Errorf("failed to read transcript from /full/* refs: %w", transcriptErr)
 	}
 	if len(transcript) == 0 {
 		return nil, ErrNoTranscript
