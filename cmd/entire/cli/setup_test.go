@@ -1462,6 +1462,14 @@ func TestManageAgents_AddAndRemove(t *testing.T) {
 	if !strings.Contains(output, "Removed agents") {
 		t.Errorf("Expected 'Removed agents' in output, got: %s", output)
 	}
+
+	// Verify hooks on disk: Claude removed, Gemini added
+	if checkClaudeCodeHooksInstalled() {
+		t.Error("Expected Claude Code hooks to be uninstalled after deselection")
+	}
+	if !checkGeminiCLIHooksInstalled() {
+		t.Error("Expected Gemini CLI hooks to be installed after selection")
+	}
 }
 
 func TestConfigureCmd_RemoveFlag_StillWorks(t *testing.T) {

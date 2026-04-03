@@ -12,6 +12,7 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/agent"
 	"github.com/entireio/cli/cmd/entire/cli/agent/external"
 	"github.com/entireio/cli/cmd/entire/cli/agent/types"
+	"github.com/entireio/cli/cmd/entire/cli/logging"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 	"github.com/entireio/cli/cmd/entire/cli/session"
 	"github.com/entireio/cli/cmd/entire/cli/settings"
@@ -338,26 +339,35 @@ func applyAgentChanges(ctx context.Context, w io.Writer, selectedAgentNames []st
 		return nil
 	}
 
-	// Install hooks for added agents
+	// Install hooks for added agents and uninstall hooks for removed agents.
+	// Collect errors so partial successes are visible to the user.
+	var errs []error
+	var installedAgents []agent.Agent
 	for _, ag := range addedAgents {
 		if _, err := setupAgentHooks(ctx, ag, opts.LocalDev, opts.ForceHooks); err != nil {
-			return fmt.Errorf("failed to setup %s hooks: %w", ag.Type(), err)
+			errs = append(errs, fmt.Errorf("failed to setup %s hooks: %w", ag.Type(), err))
+		} else {
+			installedAgents = append(installedAgents, ag)
 		}
 	}
 
-	// Uninstall hooks for removed agents
+	var uninstalledAgents []agent.Agent
 	for _, ag := range removedAgents {
 		hookAgent, ok := agent.AsHookSupport(ag)
 		if !ok {
+			logging.Warn(ctx, "installed agent does not support hooks, skipping removal",
+				"agent", string(ag.Name()))
 			continue
 		}
 		if err := hookAgent.UninstallHooks(ctx); err != nil {
-			return fmt.Errorf("failed to remove %s hooks: %w", ag.Type(), err)
+			errs = append(errs, fmt.Errorf("failed to remove %s hooks: %w", ag.Type(), err))
+		} else {
+			uninstalledAgents = append(uninstalledAgents, ag)
 		}
 	}
 
 	// Auto-enable external_agents setting if any new agent is external.
-	for _, ag := range addedAgents {
+	for _, ag := range installedAgents {
 		if external.IsExternal(ag) {
 			s, loadErr := LoadEntireSettings(ctx)
 			if loadErr != nil {
@@ -372,30 +382,30 @@ func applyAgentChanges(ctx context.Context, w io.Writer, selectedAgentNames []st
 					saveErr = SaveEntireSettings(ctx, s)
 				}
 				if saveErr != nil {
-					return fmt.Errorf("failed to save external_agents setting: %w", saveErr)
+					errs = append(errs, fmt.Errorf("failed to save external_agents setting: %w", saveErr))
 				}
 			}
 			break
 		}
 	}
 
-	// Print summary
-	if len(addedAgents) > 0 {
-		names := make([]string, 0, len(addedAgents))
-		for _, ag := range addedAgents {
+	// Print summary of what succeeded
+	if len(installedAgents) > 0 {
+		names := make([]string, 0, len(installedAgents))
+		for _, ag := range installedAgents {
 			names = append(names, string(ag.Type()))
 		}
 		fmt.Fprintf(w, "✓ Added agents: %s\n", strings.Join(names, ", "))
 	}
-	if len(removedAgents) > 0 {
-		names := make([]string, 0, len(removedAgents))
-		for _, ag := range removedAgents {
+	if len(uninstalledAgents) > 0 {
+		names := make([]string, 0, len(uninstalledAgents))
+		for _, ag := range uninstalledAgents {
 			names = append(names, string(ag.Type()))
 		}
 		fmt.Fprintf(w, "✓ Removed agents: %s\n", strings.Join(names, ", "))
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 func newSetupCmd() *cobra.Command {
