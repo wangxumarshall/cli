@@ -307,7 +307,7 @@ func TestV2GitStore_WriteCommittedMain_ExcludesTranscript(t *testing.T) {
 func TestV2GitStore_WriteCommittedMain_WritesCompactTranscript(t *testing.T) {
 	t.Parallel()
 	repo := initTestRepo(t)
-	store := NewV2GitStore(repo)
+	store := NewV2GitStore(repo, "origin")
 	ctx := context.Background()
 
 	compactData := []byte(`{"v":1,"agent":"claude-code","cli_version":"0.1.0","type":"user","ts":"2026-01-01T00:00:00Z","content":"hello"}`)
@@ -349,7 +349,7 @@ func TestV2GitStore_WriteCommittedMain_WritesCompactTranscript(t *testing.T) {
 func TestV2GitStore_WriteCommittedMain_NoCompactTranscript_SkipsGracefully(t *testing.T) {
 	t.Parallel()
 	repo := initTestRepo(t)
-	store := NewV2GitStore(repo)
+	store := NewV2GitStore(repo, "origin")
 	ctx := context.Background()
 
 	cpID := id.MustCheckpointID("e5f6a1b2c3d4")
@@ -382,7 +382,7 @@ func TestV2GitStore_WriteCommittedMain_NoCompactTranscript_SkipsGracefully(t *te
 func TestV2GitStore_UpdateCommitted_WritesCompactTranscript(t *testing.T) {
 	t.Parallel()
 	repo := initTestRepo(t)
-	store := NewV2GitStore(repo)
+	store := NewV2GitStore(repo, "origin")
 	ctx := context.Background()
 
 	cpID := id.MustCheckpointID("f6a1b2c3d4e5")
