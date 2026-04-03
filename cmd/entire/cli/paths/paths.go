@@ -7,8 +7,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint/id"
 )
@@ -155,6 +157,9 @@ func IsSubpath(parent, child string) bool {
 // ToRelativePath converts an absolute path to relative.
 // Returns empty string if the path is outside the working directory.
 func ToRelativePath(absPath, cwd string) string {
+	absPath = normalizeMSYSPath(absPath)
+	cwd = normalizeMSYSPath(cwd)
+
 	if !filepath.IsAbs(absPath) {
 		return absPath
 	}
@@ -164,6 +169,22 @@ func ToRelativePath(absPath, cwd string) string {
 	}
 
 	return relPath
+}
+
+// normalizeMSYSPath converts MSYS/Git Bash-style paths (e.g., /c/Users/...)
+// to Windows-style paths (e.g., C:/Users/...) so that filepath.IsAbs and
+// filepath.Rel work correctly. On non-Windows platforms this is a no-op.
+// Claude Code on Windows outputs MSYS paths in its transcript, but Go's
+// filepath package only recognizes Windows-style absolute paths.
+func normalizeMSYSPath(p string) string {
+	if runtime.GOOS != "windows" {
+		return p
+	}
+	// MSYS paths look like /c/Users/... where the second char is a drive letter
+	if len(p) >= 3 && p[0] == '/' && unicode.IsLetter(rune(p[1])) && p[2] == '/' {
+		return string(unicode.ToUpper(rune(p[1]))) + ":" + p[2:]
+	}
+	return p
 }
 
 // nonAlphanumericRegex matches any non-alphanumeric character
