@@ -1027,6 +1027,41 @@ func TestRunStatus_ShowsEnabledAgents(t *testing.T) {
 	}
 }
 
+func TestRunStatus_DetailedShowsEnabledAgents(t *testing.T) {
+	setupTestRepo(t)
+	writeSettings(t, testSettingsEnabled)
+	writeClaudeHooksFixture(t)
+
+	var stdout bytes.Buffer
+	if err := runStatus(context.Background(), &stdout, true); err != nil {
+		t.Fatalf("runStatus() error = %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "Hooks installed:") {
+		t.Errorf("Expected 'Hooks installed:' in detailed output, got: %s", output)
+	}
+	if !strings.Contains(output, "Claude Code") {
+		t.Errorf("Expected 'Claude Code' in detailed output, got: %s", output)
+	}
+}
+
+func TestRunStatus_DetailedDisabledDoesNotShowAgents(t *testing.T) {
+	setupTestRepo(t)
+	writeSettings(t, testSettingsDisabled)
+	writeClaudeHooksFixture(t)
+
+	var stdout bytes.Buffer
+	if err := runStatus(context.Background(), &stdout, true); err != nil {
+		t.Fatalf("runStatus() error = %v", err)
+	}
+
+	output := stdout.String()
+	if strings.Contains(output, "Hooks installed:") {
+		t.Errorf("Disabled detailed status should not show agents, got: %s", output)
+	}
+}
+
 func TestRunStatus_DisabledDoesNotShowAgents(t *testing.T) {
 	setupTestRepo(t)
 	writeSettings(t, testSettingsDisabled)
