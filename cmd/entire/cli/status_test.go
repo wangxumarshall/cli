@@ -1019,8 +1019,8 @@ func TestRunStatus_ShowsEnabledAgents(t *testing.T) {
 	}
 
 	output := stdout.String()
-	if !strings.Contains(output, "Hooks installed:") {
-		t.Errorf("Expected 'Hooks installed:' in output, got: %s", output)
+	if !strings.Contains(output, "agents") {
+		t.Errorf("Expected 'agents' in output, got: %s", output)
 	}
 	if !strings.Contains(output, "Claude Code") {
 		t.Errorf("Expected 'Claude Code' in output, got: %s", output)
@@ -1038,7 +1038,7 @@ func TestRunStatus_EnabledNoAgentsHidesHooksLine(t *testing.T) {
 	}
 
 	output := stdout.String()
-	if strings.Contains(output, "Hooks installed:") {
+	if strings.Contains(output, "agents") {
 		t.Errorf("Should not show hooks line when no agents installed, got: %s", output)
 	}
 }
@@ -1054,8 +1054,8 @@ func TestRunStatus_DetailedShowsEnabledAgents(t *testing.T) {
 	}
 
 	output := stdout.String()
-	if !strings.Contains(output, "Hooks installed:") {
-		t.Errorf("Expected 'Hooks installed:' in detailed output, got: %s", output)
+	if !strings.Contains(output, "agents") {
+		t.Errorf("Expected 'agents' in detailed output, got: %s", output)
 	}
 	if !strings.Contains(output, "Claude Code") {
 		t.Errorf("Expected 'Claude Code' in detailed output, got: %s", output)
@@ -1073,7 +1073,7 @@ func TestRunStatus_DetailedDisabledDoesNotShowAgents(t *testing.T) {
 	}
 
 	output := stdout.String()
-	if strings.Contains(output, "Hooks installed:") {
+	if strings.Contains(output, "agents") {
 		t.Errorf("Disabled detailed status should not show agents, got: %s", output)
 	}
 }
@@ -1089,7 +1089,7 @@ func TestRunStatus_DisabledDoesNotShowAgents(t *testing.T) {
 	}
 
 	output := stdout.String()
-	if strings.Contains(output, "Hooks installed:") {
+	if strings.Contains(output, "agents") {
 		t.Errorf("Disabled status should not show agents, got: %s", output)
 	}
 }

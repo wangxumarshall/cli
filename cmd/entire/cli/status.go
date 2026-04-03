@@ -165,12 +165,9 @@ func formatSettingsStatusShort(ctx context.Context, s *EntireSettings, sty statu
 	if s.Enabled {
 		if displayNames := InstalledAgentDisplayNames(ctx); len(displayNames) > 0 {
 			b.WriteString("\n")
-			b.WriteString(sty.render(sty.dim, "  Hooks installed: "))
-			styledNames := make([]string, len(displayNames))
-			for i, dn := range displayNames {
-				styledNames[i] = sty.render(sty.agent, dn)
-			}
-			b.WriteString(strings.Join(styledNames, sty.render(sty.dim, ", ")))
+			b.WriteString(sty.render(sty.dim, "  Agents · "))
+
+			b.WriteString(strings.Join(displayNames, ", "))
 		}
 	}
 
