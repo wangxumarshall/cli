@@ -1138,6 +1138,49 @@ func TestFormatSettingsStatus_LocalDisabled(t *testing.T) {
 	}
 }
 
+func TestWriteActiveSessions_StaleIndicator(t *testing.T) {
+	setupTestRepo(t)
+
+	store, err := session.NewStateStore(context.Background())
+	if err != nil {
+		t.Fatalf("NewStateStore() error = %v", err)
+	}
+
+	now := time.Now()
+	staleInteraction := now.Add(-2 * time.Hour) // well past 1hr threshold
+
+	states := []*session.State{
+		{
+			SessionID:           "stale-session-1",
+			WorktreePath:        "/Users/test/repo",
+			StartedAt:           now.Add(-3 * time.Hour),
+			LastInteractionTime: &staleInteraction,
+			Phase:               session.PhaseActive,
+			LastPrompt:          "fix the bug",
+			AgentType:           "Claude Code",
+		},
+	}
+
+	for _, s := range states {
+		if err := store.Save(context.Background(), s); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+
+	var buf bytes.Buffer
+	sty := newStatusStyles(&buf)
+	writeActiveSessions(context.Background(), &buf, sty)
+
+	output := buf.String()
+
+	if !strings.Contains(output, "stale") {
+		t.Errorf("Expected 'stale' indicator for session with interaction >1hr ago, got: %s", output)
+	}
+	if !strings.Contains(output, "entire doctor") {
+		t.Errorf("Expected 'entire doctor' hint in stale indicator, got: %s", output)
+	}
+}
+
 func TestFormatSettingsStatus_Separators(t *testing.T) {
 	t.Parallel()
 
