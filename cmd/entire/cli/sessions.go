@@ -426,9 +426,8 @@ func writeSessionInfoText(w io.Writer, state *strategy.SessionState, status stri
 		fmt.Fprintf(w, "Checkpoint:  %s\n", state.LastCheckpointID)
 	}
 
-	if state.TokenUsage != nil {
-		total := totalTokens(state.TokenUsage)
-		fmt.Fprintf(w, "\nTokens:      %s\n", formatTokenCount(total))
+	if t := totalTokens(state.TokenUsage); t > 0 {
+		fmt.Fprintf(w, "\nTokens:      %s\n", formatTokenCount(t))
 
 		var parts []string
 		if state.TokenUsage.InputTokens > 0 {
