@@ -1234,8 +1234,8 @@ func TestIsStuckActiveSession(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := isStuckActiveSession(tt.state); got != tt.want {
-				t.Errorf("isStuckActiveSession() = %v, want %v", got, tt.want)
+			if got := tt.state.IsStuckActive(); got != tt.want {
+				t.Errorf("IsStuckActive() = %v, want %v", got, tt.want)
 			}
 		})
 	}

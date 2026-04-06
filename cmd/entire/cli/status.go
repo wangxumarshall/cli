@@ -333,7 +333,7 @@ func writeActiveSessions(ctx context.Context, w io.Writer, sty statusStyles) {
 			stats = append(stats, "tokens "+formatTokenCount(totalTokens(st.TokenUsage)))
 
 			statsLine := strings.Join(stats, sty.render(sty.dim, " · "))
-			if isStuckActiveSession(st) {
+			if st.IsStuckActive() {
 				fmt.Fprintf(w, "%s %s %s\n", sty.render(sty.dim, statsLine),
 					sty.render(sty.dim, "·"),
 					sty.render(sty.yellow, "stale")+" (run 'entire doctor')")
@@ -354,24 +354,6 @@ func writeActiveSessions(ctx context.Context, w io.Writer, sty statusStyles) {
 	}
 	fmt.Fprintln(w, sty.render(sty.dim, footer))
 	fmt.Fprintln(w)
-}
-
-// isStuckActiveSession returns true if the session is in ACTIVE phase but has
-// not had any interaction for longer than the staleness threshold (defined in
-// doctor.go). Unlike doctor, this falls back to StartedAt when LastInteractionTime
-// is nil, so brand-new sessions are not falsely flagged as stale.
-//
-// Not to be confused with session.State.IsStale() which uses a 7-day TTL for
-// auto-cleanup of old session state files.
-func isStuckActiveSession(st *session.State) bool {
-	if !st.Phase.IsActive() {
-		return false
-	}
-	ref := st.LastInteractionTime
-	if ref == nil {
-		ref = &st.StartedAt
-	}
-	return time.Since(*ref) > stalenessThreshold
 }
 
 // resolveWorktreeBranch resolves the current branch for a worktree path
