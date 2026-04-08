@@ -1131,8 +1131,7 @@ func compactTranscriptForV2(ctx context.Context, ag agent.Agent, transcript []by
 	return compacted
 }
 
-// countCompactLines returns the number of lines in a compact transcript.
-// Each line is newline-terminated by compact.appendLine, so we count '\n' bytes.
+// countCompactLines returns line count for compact transcript JSONL.
 func countCompactLines(compactTranscript []byte) int {
 	return bytes.Count(compactTranscript, []byte{'\n'})
 }

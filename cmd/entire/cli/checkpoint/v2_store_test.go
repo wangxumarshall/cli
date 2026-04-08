@@ -397,8 +397,8 @@ func TestV2GitStore_WriteCommittedMain_UsesCompactTranscriptStart(t *testing.T) 
 		Prompts:                   []string{"hello"},
 		AuthorName:                "Test",
 		AuthorEmail:               "test@test.com",
-		CheckpointTranscriptStart: 42, // full.jsonl offset (should NOT appear in v2 metadata)
-		CompactTranscriptStart:    15, // transcript.jsonl offset (should appear in v2 metadata)
+		CheckpointTranscriptStart: 42, // full.jsonl offset (must not be used in v2 metadata)
+		CompactTranscriptStart:    15, // transcript.jsonl offset (must be used in v2 metadata)
 	})
 	require.NoError(t, err)
 
@@ -410,7 +410,7 @@ func TestV2GitStore_WriteCommittedMain_UsesCompactTranscriptStart(t *testing.T) 
 	var metadata CommittedMetadata
 	require.NoError(t, json.Unmarshal([]byte(metadataContent), &metadata))
 
-	// checkpoint_transcript_start should be the compact offset (15), not the full.jsonl offset (42)
+	// v2 should store the compact offset, not the full transcript offset.
 	assert.Equal(t, 15, metadata.CheckpointTranscriptStart,
 		"v2 /main metadata should use CompactTranscriptStart for checkpoint_transcript_start")
 }

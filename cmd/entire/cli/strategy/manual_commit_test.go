@@ -4028,9 +4028,8 @@ func TestCondenseSession_V2DualWrite(t *testing.T) {
 	require.NoError(t, err, "full.jsonl should exist on /full/current")
 }
 
-// TestCondenseSession_V2CompactTranscriptStart verifies that the v2 /main metadata
-// uses the compact transcript.jsonl line offset (CompactTranscriptStart) for
-// checkpoint_transcript_start, not the full.jsonl line offset.
+// TestCondenseSession_V2CompactTranscriptStart verifies v2 /main writes
+// checkpoint_transcript_start from compact transcript offset, not full.jsonl offset.
 func TestCondenseSession_V2CompactTranscriptStart(t *testing.T) {
 	dir := t.TempDir()
 	repo, err := git.PlainInit(dir, false)
@@ -4086,13 +4085,13 @@ func TestCondenseSession_V2CompactTranscriptStart(t *testing.T) {
 	state.BaseCommit = commitHash.String()[:7]
 	state.AgentType = agent.AgentTypeClaudeCode
 
-	// First condensation — CompactTranscriptStart should be 0
+	// First condensation starts at compact offset 0.
 	checkpointID := id.MustCheckpointID("cc11dd22ee33")
 	result, err := s.CondenseSession(context.Background(), repo, checkpointID, state, nil)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
-	// Verify v2 /main metadata has checkpoint_transcript_start = 0 (first checkpoint)
+	// v2 /main should have checkpoint_transcript_start = 0 for first checkpoint.
 	v2MainRef, err := repo.Reference(plumbing.ReferenceName(paths.V2MainRefName), true)
 	require.NoError(t, err)
 	v2MainCommit, err := repo.CommitObject(v2MainRef.Hash())
@@ -4113,7 +4112,7 @@ func TestCondenseSession_V2CompactTranscriptStart(t *testing.T) {
 	require.Equal(t, 0, v2Metadata.CheckpointTranscriptStart,
 		"first checkpoint v2 metadata should have checkpoint_transcript_start=0")
 
-	// Read the v1 metadata for comparison
+	// Read v1 metadata for comparison.
 	v1Ref, err := repo.Reference(plumbing.NewBranchReferenceName(paths.MetadataBranchName), true)
 	require.NoError(t, err)
 	v1Commit, err := repo.CommitObject(v1Ref.Hash())

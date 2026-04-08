@@ -109,12 +109,9 @@ type State struct {
 	// against this value without reading the full transcript content.
 	CheckpointTranscriptSize int64 `json:"checkpoint_transcript_size,omitempty"`
 
-	// CompactTranscriptStart is the transcript.jsonl (compact format) line offset
-	// where the current checkpoint cycle began. Parallel to CheckpointTranscriptStart
-	// (which tracks full.jsonl lines). Used for v2 checkpoint metadata where
-	// checkpoint_transcript_start should correspond to transcript.jsonl, not full.jsonl.
-	// Set to 0 at session start, updated to cumulative compact line count after each
-	// condensation.
+	// CompactTranscriptStart is the transcript.jsonl line offset where the current
+	// checkpoint cycle began. It parallels CheckpointTranscriptStart (full.jsonl)
+	// and is updated after each condensation.
 	CompactTranscriptStart int `json:"compact_transcript_start,omitempty"`
 
 	// Deprecated: CondensedTranscriptLines is replaced by CheckpointTranscriptStart.
@@ -241,6 +238,12 @@ func (s *State) NormalizeAfterLoad(ctx context.Context) {
 		} else if s.TranscriptLinesAtStart > 0 {
 			s.CheckpointTranscriptStart = s.TranscriptLinesAtStart
 		}
+	}
+	// Backfill CompactTranscriptStart for legacy sessions so v2 incremental scoping
+	// does not regress to zero on first post-upgrade condensation.
+	// Legacy state has no compact-specific offset, so we reuse checkpoint start.
+	if s.CompactTranscriptStart == 0 && s.CheckpointTranscriptStart > 0 {
+		s.CompactTranscriptStart = s.CheckpointTranscriptStart
 	}
 	// Clear deprecated fields so they aren't re-persisted.
 	// Note: this is a one-way migration. If the state is re-saved, older CLI versions
