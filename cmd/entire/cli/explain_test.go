@@ -866,9 +866,10 @@ func TestRunExplainCheckpoint_V2OnlyCheckpoint(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
 
-	repo, err := git.PlainInit(tmpDir, false)
+	testutil.InitRepo(t, tmpDir)
+	repo, err := git.PlainOpen(tmpDir)
 	if err != nil {
-		t.Fatalf("failed to init git repo: %v", err)
+		t.Fatalf("failed to open git repo: %v", err)
 	}
 
 	wt, err := repo.Worktree()
@@ -931,9 +932,10 @@ func TestRunExplainCheckpoint_V2OnlyRawTranscript(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
 
-	repo, err := git.PlainInit(tmpDir, false)
+	testutil.InitRepo(t, tmpDir)
+	repo, err := git.PlainOpen(tmpDir)
 	if err != nil {
-		t.Fatalf("failed to init git repo: %v", err)
+		t.Fatalf("failed to open git repo: %v", err)
 	}
 
 	wt, err := repo.Worktree()
@@ -993,9 +995,10 @@ func TestRunExplainCheckpoint_V2UsesCompactTranscriptForIntent(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
 
-	repo, err := git.PlainInit(tmpDir, false)
+	testutil.InitRepo(t, tmpDir)
+	repo, err := git.PlainOpen(tmpDir)
 	if err != nil {
-		t.Fatalf("failed to init git repo: %v", err)
+		t.Fatalf("failed to open git repo: %v", err)
 	}
 
 	wt, err := repo.Worktree()
@@ -1062,7 +1065,8 @@ func TestRunExplainCheckpoint_V2PreferredGenerateWritesBothStores(t *testing.T) 
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
 
-	repo, err := git.PlainInit(tmpDir, false)
+	testutil.InitRepo(t, tmpDir)
+	repo, err := git.PlainOpen(tmpDir)
 	require.NoError(t, err)
 
 	wt, err := repo.Worktree()
@@ -1122,7 +1126,8 @@ func TestRunExplainCheckpoint_V2OnlyGenerateFailsBecauseV1Required(t *testing.T)
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
 
-	repo, err := git.PlainInit(tmpDir, false)
+	testutil.InitRepo(t, tmpDir)
+	repo, err := git.PlainOpen(tmpDir)
 	require.NoError(t, err)
 
 	wt, err := repo.Worktree()
@@ -1177,7 +1182,8 @@ func TestRunExplainCheckpoint_V2CompactTranscriptNotUsedForGenerate(t *testing.T
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
 
-	repo, err := git.PlainInit(tmpDir, false)
+	testutil.InitRepo(t, tmpDir)
+	repo, err := git.PlainOpen(tmpDir)
 	require.NoError(t, err)
 
 	wt, err := repo.Worktree()
@@ -1238,7 +1244,8 @@ func TestListCommittedForExplain_MergesV1AndV2(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	repo, err := git.PlainInit(tmpDir, false)
+	testutil.InitRepo(t, tmpDir)
+	repo, err := git.PlainOpen(tmpDir)
 	require.NoError(t, err)
 
 	wt, err := repo.Worktree()
@@ -1312,7 +1319,8 @@ func TestListCommittedForExplain_V2Disabled_ReturnsV1Only(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	repo, err := git.PlainInit(tmpDir, false)
+	testutil.InitRepo(t, tmpDir)
+	repo, err := git.PlainOpen(tmpDir)
 	require.NoError(t, err)
 
 	wt, err := repo.Worktree()
