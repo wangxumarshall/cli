@@ -189,6 +189,51 @@ func TestGenerateCheckpointAISummary_UsesParentDeadlineAndWrapsSentinel(t *testi
 	}
 }
 
+func TestGenerateCheckpointAISummary_ClampsLongParentDeadlineToDefaultTimeout(t *testing.T) {
+	tmpTimeout := checkpointSummaryTimeout
+	tmpGenerator := generateTranscriptSummary
+	t.Cleanup(func() {
+		checkpointSummaryTimeout = tmpTimeout
+		generateTranscriptSummary = tmpGenerator
+	})
+
+	checkpointSummaryTimeout = 50 * time.Millisecond
+
+	parentCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	var gotDeadline time.Time
+	generateTranscriptSummary = func(
+		ctx context.Context,
+		_ []byte,
+		_ []string,
+		_ types.AgentType,
+		_ summarize.Generator,
+	) (*checkpoint.Summary, error) {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			return nil, errors.New("expected deadline on summary context")
+		}
+		gotDeadline = deadline
+		return &checkpoint.Summary{Intent: "intent", Outcome: "outcome"}, nil
+	}
+
+	start := time.Now()
+	summary, err := generateCheckpointAISummary(parentCtx, []byte("transcript"), nil, agent.AgentTypeClaudeCode)
+	if err != nil {
+		t.Fatalf("generateCheckpointAISummary() error = %v", err)
+	}
+	if summary == nil {
+		t.Fatal("expected summary")
+	}
+	if gotDeadline.IsZero() {
+		t.Fatal("expected deadline to be set")
+	}
+	if remaining := gotDeadline.Sub(start); remaining < 30*time.Millisecond || remaining > 200*time.Millisecond {
+		t.Fatalf("deadline offset = %s, want around %s", remaining, checkpointSummaryTimeout)
+	}
+}
+
 func TestGenerateCheckpointAISummary_UsesCancellationSentinel(t *testing.T) {
 	tmpTimeout := checkpointSummaryTimeout
 	tmpGenerator := generateTranscriptSummary

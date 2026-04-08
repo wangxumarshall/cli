@@ -516,16 +516,10 @@ func generateCheckpointSummary(ctx context.Context, w, errW io.Writer, v1Store *
 }
 
 func generateCheckpointAISummary(ctx context.Context, scopedTranscript []byte, filesTouched []string, agentType types.AgentType) (*checkpoint.Summary, error) {
-	timeoutCtx := ctx
-	cancel := func() {}
+	timeoutCtx, cancel := context.WithTimeout(ctx, checkpointSummaryTimeout)
 	timeoutDuration := checkpointSummaryTimeout
-
-	if deadline, ok := ctx.Deadline(); ok {
+	if deadline, ok := timeoutCtx.Deadline(); ok {
 		timeoutDuration = time.Until(deadline)
-	} else {
-		var cancelFunc context.CancelFunc
-		timeoutCtx, cancelFunc = context.WithTimeout(ctx, checkpointSummaryTimeout)
-		cancel = cancelFunc
 	}
 	defer cancel()
 
