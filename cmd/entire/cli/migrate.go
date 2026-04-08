@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -203,6 +204,7 @@ func migrateOneCheckpoint(ctx context.Context, repo *git.Repository, v1Store *ch
 		compacted := tryCompactTranscript(ctx, content.Transcript, content.Metadata)
 		if compacted != nil {
 			opts.CompactTranscript = compacted
+			opts.CompactTranscriptStart = computeCompactOffset(content.Transcript, compacted, content.Metadata)
 		} else if len(content.Transcript) > 0 {
 			compactFailed = true
 		}
@@ -444,6 +446,33 @@ func tryCompactTranscript(ctx context.Context, transcript []byte, m checkpoint.C
 		return nil
 	}
 	return compacted
+}
+
+// computeCompactOffset determines the transcript.jsonl line offset for a checkpoint
+// by comparing a full compact (startLine=0) against the scoped compact. The difference
+// is the number of compact lines before this checkpoint's data.
+func computeCompactOffset(fullTranscript, scopedCompact []byte, m checkpoint.CommittedMetadata) int {
+	startLine := m.GetTranscriptStart()
+	if startLine == 0 || len(fullTranscript) == 0 || m.Agent == "" {
+		return 0
+	}
+
+	fullCompacted, err := compact.Compact(fullTranscript, compact.MetadataFields{
+		Agent:      string(m.Agent),
+		CLIVersion: versioninfo.Version,
+		StartLine:  0,
+	})
+	if err != nil || len(fullCompacted) == 0 {
+		return 0
+	}
+
+	fullLines := bytes.Count(fullCompacted, []byte{'\n'})
+	scopedLines := bytes.Count(scopedCompact, []byte{'\n'})
+	offset := fullLines - scopedLines
+	if offset < 0 {
+		return 0
+	}
+	return offset
 }
 
 // copyTaskMetadataToV2 copies task metadata files (subagent transcripts, checkpoint JSONs)

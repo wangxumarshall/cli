@@ -107,11 +107,11 @@ func TestState_NormalizeAfterLoad_JSONRoundTrip(t *testing.T) {
 		wantStep    int // StepCount
 	}{
 		{
-			name:     "migrates old condensed_transcript_lines",
-			json:     `{"session_id":"s1","condensed_transcript_lines":42,"checkpoint_count":5}`,
-			wantCTS:  42,
+			name:        "migrates old condensed_transcript_lines",
+			json:        `{"session_id":"s1","condensed_transcript_lines":42,"checkpoint_count":5}`,
+			wantCTS:     42,
 			wantCompact: 42,
-			wantStep: 5,
+			wantStep:    5,
 		},
 		{
 			name:        "migrates old transcript_lines_at_start",
