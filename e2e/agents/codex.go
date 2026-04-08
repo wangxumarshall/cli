@@ -25,6 +25,7 @@ type Codex struct{}
 
 type CodexSession struct {
 	*TmuxSession
+
 	home string
 }
 
@@ -183,6 +184,7 @@ func (c *Codex) StartSession(ctx context.Context, dir string) (Session, error) {
 }
 
 func (c *Codex) ResumeSession(ctx context.Context, dir, home, sessionID string) (Session, error) {
+	_ = ctx
 	name := fmt.Sprintf("codex-resume-%d", time.Now().UnixNano())
 
 	s, err := c.startTmuxSession(name, dir, home, "codex", "--dangerously-bypass-approvals-and-sandbox", "resume", sessionID)

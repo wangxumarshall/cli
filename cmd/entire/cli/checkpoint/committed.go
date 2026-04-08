@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
+	"github.com/entireio/cli/cmd/entire/cli/agent/codex"
 	"github.com/entireio/cli/cmd/entire/cli/agent/types"
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint/id"
 	"github.com/entireio/cli/cmd/entire/cli/jsonutil"
@@ -24,6 +25,7 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/trailers"
 	"github.com/entireio/cli/cmd/entire/cli/validation"
 	"github.com/entireio/cli/cmd/entire/cli/versioninfo"
+	"github.com/entireio/cli/perf"
 	"github.com/entireio/cli/redact"
 
 	"github.com/go-git/go-git/v6"
@@ -639,23 +641,38 @@ func (s *GitStore) writeTranscript(ctx context.Context, opts WriteCommittedOptio
 		return nil
 	}
 
+	if opts.Agent == agent.AgentTypeCodex {
+		transcript = codex.SanitizePortableTranscript(transcript)
+	}
+
 	// Redact secrets before chunking so content hash reflects redacted content
+	redactCtx, redactTranscriptSpan := perf.Start(ctx, "redact_transcript")
 	transcript, err := redact.JSONLBytes(transcript)
 	if err != nil {
+		redactTranscriptSpan.RecordError(err)
+		redactTranscriptSpan.End()
 		return fmt.Errorf("failed to redact transcript secrets: %w", err)
 	}
+	redactTranscriptSpan.End()
 
 	// Chunk the transcript if it's too large
-	chunks, err := agent.ChunkTranscript(ctx, transcript, opts.Agent)
+	chunkCtx, chunkTranscriptSpan := perf.Start(redactCtx, "chunk_transcript")
+	chunks, err := agent.ChunkTranscript(chunkCtx, transcript, opts.Agent)
 	if err != nil {
+		chunkTranscriptSpan.RecordError(err)
+		chunkTranscriptSpan.End()
 		return fmt.Errorf("failed to chunk transcript: %w", err)
 	}
+	chunkTranscriptSpan.End()
 
 	// Write chunk files
+	blobCtx, writeTranscriptBlobsSpan := perf.Start(chunkCtx, "write_transcript_blobs")
 	for i, chunk := range chunks {
 		chunkPath := basePath + agent.ChunkFileName(paths.TranscriptFileName, i)
 		blobHash, err := CreateBlobFromContent(s.repo, chunk)
 		if err != nil {
+			writeTranscriptBlobsSpan.RecordError(err)
+			writeTranscriptBlobsSpan.End()
 			return err
 		}
 		entries[chunkPath] = object.TreeEntry{
@@ -664,11 +681,15 @@ func (s *GitStore) writeTranscript(ctx context.Context, opts WriteCommittedOptio
 			Hash: blobHash,
 		}
 	}
+	writeTranscriptBlobsSpan.End()
 
 	// Content hash for deduplication (hash of full transcript)
+	_, contentHashSpan := perf.Start(blobCtx, "write_transcript_content_hash")
 	contentHash := fmt.Sprintf("sha256:%x", sha256.Sum256(transcript))
 	hashBlob, err := CreateBlobFromContent(s.repo, []byte(contentHash))
 	if err != nil {
+		contentHashSpan.RecordError(err)
+		contentHashSpan.End()
 		return err
 	}
 	entries[basePath+paths.ContentHashFileName] = object.TreeEntry{
@@ -676,6 +697,7 @@ func (s *GitStore) writeTranscript(ctx context.Context, opts WriteCommittedOptio
 		Mode: filemode.Regular,
 		Hash: hashBlob,
 	}
+	contentHashSpan.End()
 	return nil
 }
 

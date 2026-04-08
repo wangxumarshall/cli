@@ -30,6 +30,8 @@ type rolloutLine struct {
 	Payload   json.RawMessage `json:"payload"`
 }
 
+const rolloutLineTypeResponseItem = "response_item"
+
 // sessionMetaPayload is the payload for type="session_meta" lines.
 type sessionMetaPayload struct {
 	ID        string `json:"id"`
@@ -157,7 +159,7 @@ func extractFilesFromLine(lineData []byte) []string {
 		return nil
 	}
 
-	if line.Type != "response_item" {
+	if line.Type != rolloutLineTypeResponseItem {
 		return nil
 	}
 
@@ -275,7 +277,7 @@ func (c *CodexAgent) ExtractPrompts(sessionRef string, fromOffset int) ([]string
 			continue
 		}
 
-		if line.Type != "response_item" {
+		if line.Type != rolloutLineTypeResponseItem {
 			continue
 		}
 
@@ -304,10 +306,10 @@ func (c *CodexAgent) ExtractPrompts(sessionRef string, fromOffset int) ([]string
 	return prompts, nil
 }
 
-// sanitizeRestoredTranscript strips encrypted history fragments that cannot be
+// SanitizePortableTranscript strips encrypted history fragments that cannot be
 // replayed when Entire reconstructs a Codex rollout outside its original
 // session context.
-func sanitizeRestoredTranscript(data []byte) []byte {
+func SanitizePortableTranscript(data []byte) []byte {
 	lines := splitJSONL(data)
 	if len(lines) == 0 {
 		return data
@@ -328,6 +330,10 @@ func sanitizeRestoredTranscript(data []byte) []byte {
 	return agent.ReassembleJSONL(sanitized)
 }
 
+func sanitizeRestoredTranscript(data []byte) []byte {
+	return SanitizePortableTranscript(data)
+}
+
 func sanitizeRolloutLine(lineData []byte) ([]byte, bool) {
 	var line rolloutLine
 	if err := json.Unmarshal(lineData, &line); err != nil {
@@ -336,7 +342,7 @@ func sanitizeRolloutLine(lineData []byte) ([]byte, bool) {
 	if line.Type == "compacted" {
 		return sanitizeCompactedLine(line)
 	}
-	if line.Type != "response_item" {
+	if line.Type != rolloutLineTypeResponseItem {
 		return lineData, true
 	}
 
@@ -345,7 +351,10 @@ func sanitizeRolloutLine(lineData []byte) ([]byte, bool) {
 		return lineData, true
 	}
 
-	itemType, _ := payload["type"].(string)
+	itemType, ok := payload["type"].(string)
+	if !ok {
+		return lineData, true
+	}
 	switch itemType {
 	case "reasoning":
 		delete(payload, "encrypted_content")
@@ -400,7 +409,11 @@ func sanitizeHistoryItems(items []any) []any {
 			continue
 		}
 
-		itemType, _ := itemMap["type"].(string)
+		itemType, ok := itemMap["type"].(string)
+		if !ok {
+			sanitized = append(sanitized, itemMap)
+			continue
+		}
 		switch itemType {
 		case "reasoning":
 			delete(itemMap, "encrypted_content")
