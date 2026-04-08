@@ -189,6 +189,40 @@ func TestGenerateCheckpointAISummary_UsesParentDeadlineAndWrapsSentinel(t *testi
 	}
 }
 
+func TestGenerateCheckpointAISummary_UsesCancellationSentinel(t *testing.T) {
+	tmpTimeout := checkpointSummaryTimeout
+	tmpGenerator := generateTranscriptSummary
+	t.Cleanup(func() {
+		checkpointSummaryTimeout = tmpTimeout
+		generateTranscriptSummary = tmpGenerator
+	})
+
+	parentCtx, cancel := context.WithCancel(context.Background())
+
+	generateTranscriptSummary = func(
+		ctx context.Context,
+		_ []byte,
+		_ []string,
+		_ types.AgentType,
+		_ summarize.Generator,
+	) (*checkpoint.Summary, error) {
+		cancel()
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+
+	_, err := generateCheckpointAISummary(parentCtx, []byte("transcript"), nil, agent.AgentTypeClaudeCode)
+	if err == nil {
+		t.Fatal("expected cancellation error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected Canceled, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "canceled") {
+		t.Fatalf("expected cancellation message, got %v", err)
+	}
+}
+
 func TestExplainCommit_NotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)

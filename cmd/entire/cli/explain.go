@@ -531,6 +531,9 @@ func generateCheckpointAISummary(ctx context.Context, scopedTranscript []byte, f
 
 	summary, err := generateTranscriptSummary(timeoutCtx, scopedTranscript, filesTouched, agentType, nil)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(timeoutCtx.Err(), context.Canceled) {
+			return nil, fmt.Errorf("summary generation canceled: %w", context.Canceled)
+		}
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(timeoutCtx.Err(), context.DeadlineExceeded) {
 			return nil, fmt.Errorf("summary generation timed out after %s: %w", formatSummaryTimeout(timeoutDuration), context.DeadlineExceeded)
 		}
