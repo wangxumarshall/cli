@@ -68,6 +68,7 @@ func TestCodexAgent_FormatResumeCommand(t *testing.T) {
 
 func TestCodexAgent_GetSessionDir(t *testing.T) {
 	fakeHome := t.TempDir()
+	t.Setenv("CODEX_HOME", "")
 	t.Setenv("HOME", fakeHome)
 
 	ag := &CodexAgent{}
