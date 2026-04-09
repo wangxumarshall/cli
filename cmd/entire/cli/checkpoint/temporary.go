@@ -1093,14 +1093,10 @@ type changedFilesResult struct {
 	Deleted []string // Files that were deleted (need to be excluded from checkpoint tree)
 }
 
-// collectChangedFiles returns all changed files from git status for the first checkpoint.
-//
-// For the first checkpoint, we need to capture:
 // filterGitIgnoredFiles removes gitignored files from the list using `git check-ignore`.
 // This prevents secrets in gitignored files (e.g., .env) from leaking into shadow branch
 // commits when agents report them as modified/new in their transcripts.
-// Falls open: if git check-ignore fails, returns the original list filtered only by
-// IsInfrastructurePath (same as before this fix was added).
+// On failure, fails closed (returns nil) to avoid leaking secrets.
 func filterGitIgnoredFiles(ctx context.Context, repo *git.Repository, files []string) []string {
 	if len(files) == 0 {
 		return files
@@ -1114,23 +1110,23 @@ func filterGitIgnoredFiles(ctx context.Context, repo *git.Repository, files []st
 
 	// Use git check-ignore to identify which files are ignored.
 	// Pass files via stdin (-z for NUL-separated, --stdin) to handle special characters.
-	// --no-index: also check files that are already tracked (belt-and-suspenders).
 	cmd := exec.CommandContext(ctx, "git", "check-ignore", "-z", "--stdin")
 	cmd.Dir = repoRoot
 	cmd.Stdin = strings.NewReader(strings.Join(files, "\x00") + "\x00")
 
 	output, err := cmd.Output()
 	if err != nil {
-		// Exit code 1 means no files are ignored — that's fine.
-		// Any other error: fall open with infrastructure-only filtering.
 		exitErr := &exec.ExitError{}
-		if errors.As(err, &exitErr) {
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			// Exit code 1 means no files are ignored — all files are safe.
 			return files
 		}
+		// Any other failure (exit 128, git not found, etc.): fail closed.
+		// A missing checkpoint is better than leaked secrets.
 		logging.Warn(logging.WithComponent(ctx, "checkpoint"),
-			"git check-ignore failed, falling back to infrastructure filter only",
+			"git check-ignore failed, excluding all files from checkpoint",
 			slog.String("error", err.Error()))
-		return files
+		return nil
 	}
 
 	// Parse NUL-separated output of ignored file names
@@ -1143,19 +1139,27 @@ func filterGitIgnoredFiles(ctx context.Context, repo *git.Repository, files []st
 
 	// Filter: keep only files that are not ignored
 	var kept []string
+	filteredCount := 0
 	for _, file := range files {
 		if _, isIgnored := ignored[file]; isIgnored {
-			logging.Info(logging.WithComponent(ctx, "checkpoint"),
-				"filtering gitignored file from checkpoint",
-				slog.String("file", file))
+			filteredCount++
 			continue
 		}
 		kept = append(kept, file)
 	}
 
+	if filteredCount > 0 {
+		logging.Debug(logging.WithComponent(ctx, "checkpoint"),
+			"filtered gitignored files from checkpoint",
+			slog.Int("count", filteredCount))
+	}
+
 	return kept
 }
 
+// collectChangedFiles returns all changed files from git status for the first checkpoint.
+//
+// For the first checkpoint, we need to capture:
 // - Modified tracked files (user's uncommitted changes)
 // - Untracked non-ignored files (new files not yet added to git)
 // - Renamed/copied files (both source removal and destination)
