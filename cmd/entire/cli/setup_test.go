@@ -73,14 +73,52 @@ func hideExternalAgentsFromPath(t *testing.T) {
 func pathWithoutExternalAgents(pathEnv string) string {
 	filtered := make([]string, 0, len(filepath.SplitList(pathEnv)))
 	for _, dir := range filepath.SplitList(pathEnv) {
-		matches, err := filepath.Glob(filepath.Join(dir, "entire-agent-*"))
-		if err != nil || len(matches) > 0 {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			filtered = append(filtered, dir)
 			continue
 		}
+
+		hasExternalAgent := false
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), "entire-agent-") {
+				hasExternalAgent = true
+				break
+			}
+		}
+		if hasExternalAgent {
+			continue
+		}
+
 		filtered = append(filtered, dir)
 	}
 
 	return strings.Join(filtered, string(os.PathListSeparator))
+}
+
+func TestPathWithoutExternalAgents_PreservesDirWithGlobMetaCharacters(t *testing.T) {
+	t.Parallel()
+
+	keepDir := filepath.Join(t.TempDir(), "bin[")
+	if err := os.MkdirAll(keepDir, 0o755); err != nil {
+		t.Fatalf("mkdir keep dir: %v", err)
+	}
+
+	externalDir := t.TempDir()
+	writeExternalAgentBinary(t, externalDir, "ext-path-filter")
+
+	filtered := pathWithoutExternalAgents(strings.Join([]string{
+		keepDir,
+		externalDir,
+	}, string(os.PathListSeparator)))
+
+	got := filepath.SplitList(filtered)
+	if !slices.Contains(got, keepDir) {
+		t.Fatalf("expected PATH to keep %q, got %v", keepDir, got)
+	}
+	if slices.Contains(got, externalDir) {
+		t.Fatalf("expected PATH to remove %q, got %v", externalDir, got)
+	}
 }
 
 func writeExternalAgentBinary(t *testing.T, dir, name string) {
