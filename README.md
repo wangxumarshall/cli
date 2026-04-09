@@ -78,7 +78,7 @@ The hooks capture session data as you work. Checkpoints are created when you or 
 
 ### 2. Work with Your AI Agent
 
-Just use one of the your AI agent as before. Entire runs in the background, tracking your session:
+Just use one of your AI agents as before. Entire runs in the background, tracking your session:
 
 ```
 entire status  # Check current session status anytime
