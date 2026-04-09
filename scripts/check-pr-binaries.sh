@@ -37,25 +37,25 @@ log "Maximum allowed binary size: ${max_binary_size_bytes} bytes"
 
 violations=()
 
-while IFS= read -r path; do
-  [[ -z "${path}" ]] && continue
+while IFS= read -r commit; do
+  [[ -z "${commit}" ]] && continue
 
-  numstat="$(git diff --numstat "${range}" -- "${path}")"
-  [[ -z "${numstat}" ]] && continue
+  while IFS=$'\t' read -r added deleted path; do
+    [[ -z "${path}" ]] && continue
 
-  added="$(printf '%s\n' "${numstat}" | awk '{print $1}')"
-  deleted="$(printf '%s\n' "${numstat}" | awk '{print $2}')"
+    # In git numstat output, binary diffs use "-" for added/deleted counts.
+    if [[ "${added}" != "-" || "${deleted}" != "-" ]]; then
+      continue
+    fi
 
-  # In git numstat output, binary diffs use "-" for added/deleted counts.
-  if [[ "${added}" != "-" || "${deleted}" != "-" ]]; then
-    continue
-  fi
+    blob_size="$(git cat-file -s "${commit}:${path}")"
+    if (( blob_size <= max_binary_size_bytes )); then
+      continue
+    fi
 
-  blob_size="$(git cat-file -s "${head_ref}:${path}")"
-  if (( blob_size > max_binary_size_bytes )); then
     violations+=("${path}:${blob_size}")
-  fi
-done < <(git diff --name-only --diff-filter=AM "${range}")
+  done < <(git diff-tree --root --no-commit-id --diff-filter=AM -r --numstat "${commit}")
+done < <(git rev-list --reverse "${base_sha}..${head_ref}")
 
 if (( ${#violations[@]} == 0 )); then
   log "No oversized binary files found."
