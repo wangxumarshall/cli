@@ -40,6 +40,40 @@ func TestParseHookEvent_SessionStart(t *testing.T) {
 	}
 }
 
+func TestParseHookEvent_SessionStart_IncludesModel(t *testing.T) {
+	t.Parallel()
+
+	ag := &CursorAgent{}
+	input := `{"conversation_id": "sess-model", "transcript_path": "/tmp/t.jsonl", "model": "gpt-4o"}`
+
+	event, err := ag.ParseHookEvent(context.Background(), HookNameSessionStart, strings.NewReader(input))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	require.NotNil(t, event, "expected event, got nil")
+	if event.Model != "gpt-4o" {
+		t.Errorf("expected model 'gpt-4o', got %q", event.Model)
+	}
+}
+
+func TestParseHookEvent_SessionStart_EmptyModel(t *testing.T) {
+	t.Parallel()
+
+	ag := &CursorAgent{}
+	input := `{"conversation_id": "sess-no-model", "transcript_path": "/tmp/t.jsonl"}`
+
+	event, err := ag.ParseHookEvent(context.Background(), HookNameSessionStart, strings.NewReader(input))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	require.NotNil(t, event, "expected event, got nil")
+	if event.Model != "" {
+		t.Errorf("expected empty model, got %q", event.Model)
+	}
+}
+
 func TestParseHookEvent_TurnStart(t *testing.T) {
 	t.Parallel()
 
