@@ -99,10 +99,14 @@ func (s *GitStore) WriteTemporary(ctx context.Context, opts WriteTemporaryOption
 		allDeletedFiles = result.Deleted
 		allDeletedFiles = append(allDeletedFiles, opts.DeletedFiles...)
 	} else {
-		// For subsequent checkpoints, only include modified/new files
-		allFiles = make([]string, 0, len(opts.ModifiedFiles)+len(opts.NewFiles))
-		allFiles = append(allFiles, opts.ModifiedFiles...)
-		allFiles = append(allFiles, opts.NewFiles...)
+		// For subsequent checkpoints, only include modified/new files.
+		// Filter out gitignored files — agent transcripts may report files like .env
+		// that exist on disk but are gitignored. Without filtering, secrets in gitignored
+		// files would leak into the shadow branch and could be pushed to remotes.
+		candidateFiles := make([]string, 0, len(opts.ModifiedFiles)+len(opts.NewFiles))
+		candidateFiles = append(candidateFiles, opts.ModifiedFiles...)
+		candidateFiles = append(candidateFiles, opts.NewFiles...)
+		allFiles = filterGitIgnoredFiles(ctx, s.repo, candidateFiles)
 		allDeletedFiles = opts.DeletedFiles
 	}
 
@@ -259,10 +263,14 @@ func (s *GitStore) WriteTemporaryTask(ctx context.Context, opts WriteTemporaryTa
 		return plumbing.ZeroHash, fmt.Errorf("failed to get shadow branch: %w", err)
 	}
 
-	// Collect all files to include in the commit
-	allFiles := make([]string, 0, len(opts.ModifiedFiles)+len(opts.NewFiles))
-	allFiles = append(allFiles, opts.ModifiedFiles...)
-	allFiles = append(allFiles, opts.NewFiles...)
+	// Collect all files to include in the commit.
+	// Filter out gitignored files — subagent transcripts may report files like .env
+	// that exist on disk but are gitignored. Without filtering, secrets would leak
+	// into the shadow branch.
+	candidateFiles := make([]string, 0, len(opts.ModifiedFiles)+len(opts.NewFiles))
+	candidateFiles = append(candidateFiles, opts.ModifiedFiles...)
+	candidateFiles = append(candidateFiles, opts.NewFiles...)
+	allFiles := filterGitIgnoredFiles(ctx, s.repo, candidateFiles)
 
 	// Build new tree with code changes (no metadata dir yet)
 	newTreeHash, err := s.buildTreeWithChanges(ctx, baseTreeHash, allFiles, opts.DeletedFiles, "", "")
@@ -1088,6 +1096,66 @@ type changedFilesResult struct {
 // collectChangedFiles returns all changed files from git status for the first checkpoint.
 //
 // For the first checkpoint, we need to capture:
+// filterGitIgnoredFiles removes gitignored files from the list using `git check-ignore`.
+// This prevents secrets in gitignored files (e.g., .env) from leaking into shadow branch
+// commits when agents report them as modified/new in their transcripts.
+// Falls open: if git check-ignore fails, returns the original list filtered only by
+// IsInfrastructurePath (same as before this fix was added).
+func filterGitIgnoredFiles(ctx context.Context, repo *git.Repository, files []string) []string {
+	if len(files) == 0 {
+		return files
+	}
+
+	wt, err := repo.Worktree()
+	if err != nil {
+		return files
+	}
+	repoRoot := wt.Filesystem.Root()
+
+	// Use git check-ignore to identify which files are ignored.
+	// Pass files via stdin (-z for NUL-separated, --stdin) to handle special characters.
+	// --no-index: also check files that are already tracked (belt-and-suspenders).
+	cmd := exec.CommandContext(ctx, "git", "check-ignore", "-z", "--stdin")
+	cmd.Dir = repoRoot
+	cmd.Stdin = strings.NewReader(strings.Join(files, "\x00") + "\x00")
+
+	output, err := cmd.Output()
+	if err != nil {
+		// Exit code 1 means no files are ignored — that's fine.
+		// Any other error: fall open with infrastructure-only filtering.
+		exitErr := &exec.ExitError{}
+		if errors.As(err, &exitErr) {
+			return files
+		}
+		logging.Warn(logging.WithComponent(ctx, "checkpoint"),
+			"git check-ignore failed, falling back to infrastructure filter only",
+			slog.String("error", err.Error()))
+		return files
+	}
+
+	// Parse NUL-separated output of ignored file names
+	ignored := make(map[string]struct{})
+	for _, name := range strings.Split(string(output), "\x00") {
+		if name != "" {
+			ignored[name] = struct{}{}
+		}
+	}
+
+	// Filter: keep only files that are not ignored
+	var kept []string
+	for _, file := range files {
+		if _, isIgnored := ignored[file]; isIgnored {
+			logging.Info(logging.WithComponent(ctx, "checkpoint"),
+				"filtering gitignored file from checkpoint",
+				slog.String("file", file))
+			continue
+		}
+		kept = append(kept, file)
+	}
+
+	return kept
+}
+
 // - Modified tracked files (user's uncommitted changes)
 // - Untracked non-ignored files (new files not yet added to git)
 // - Renamed/copied files (both source removal and destination)
