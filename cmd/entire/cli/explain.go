@@ -466,19 +466,27 @@ func generateCheckpointSummary(ctx context.Context, w, _ io.Writer, v1Store *che
 		return fmt.Errorf("failed to generate summary: %w", err)
 	}
 
-	// Persist to v1 (required).
-	if err := v1Store.UpdateSummary(ctx, checkpointID, summary); err != nil {
-		return fmt.Errorf("failed to save summary: %w", err)
+	// Persist to both stores; at least one must succeed.
+	v1Err := v1Store.UpdateSummary(ctx, checkpointID, summary)
+	var v2Err error
+	if v2Store != nil {
+		v2Err = v2Store.UpdateSummary(ctx, checkpointID, summary)
 	}
 
-	// Persist to v2 (experimental, best-effort).
-	if v2Store != nil {
-		if v2Err := v2Store.UpdateSummary(ctx, checkpointID, summary); v2Err != nil {
-			logging.Debug(ctx, "v2 UpdateSummary failed (non-fatal)",
-				slog.String("checkpoint_id", checkpointID.String()),
-				slog.String("error", v2Err.Error()),
-			)
-		}
+	if v1Err != nil && v2Err != nil {
+		return fmt.Errorf("failed to save summary: v1: %w, v2: %v", v1Err, v2Err)
+	}
+	if v1Err != nil {
+		logging.Debug(ctx, "v1 UpdateSummary failed (v2 succeeded)",
+			slog.String("checkpoint_id", checkpointID.String()),
+			slog.String("error", v1Err.Error()),
+		)
+	}
+	if v2Err != nil {
+		logging.Debug(ctx, "v2 UpdateSummary failed (v1 succeeded)",
+			slog.String("checkpoint_id", checkpointID.String()),
+			slog.String("error", v2Err.Error()),
+		)
 	}
 
 	fmt.Fprintln(w, "✓ Summary generated and saved")

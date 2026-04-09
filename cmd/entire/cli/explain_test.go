@@ -1122,7 +1122,7 @@ func TestRunExplainCheckpoint_V2PreferredGenerateWritesBothStores(t *testing.T) 
 	}
 }
 
-func TestRunExplainCheckpoint_V2OnlyGenerateFailsBecauseV1Required(t *testing.T) {
+func TestRunExplainCheckpoint_V2OnlyGenerateSucceedsViaV2Store(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
 
@@ -1164,8 +1164,8 @@ func TestRunExplainCheckpoint_V2OnlyGenerateFailsBecauseV1Required(t *testing.T)
 		AuthorEmail:  "test@example.com",
 	}))
 
-	// generate=true, force=true — should fail because v1 is required for persistence
-	// and the checkpoint only exists in v2.
+	// generate=true, force=true — should not fail with "failed to save summary"
+	// because v2 store can persist even when v1 doesn't have the checkpoint.
 	var buf, errBuf bytes.Buffer
 	err = runExplainCheckpoint(ctx, &buf, &errBuf, "f1f2f3", false, false, false, false, true, true, false)
 	if err != nil {
@@ -1173,8 +1173,8 @@ func TestRunExplainCheckpoint_V2OnlyGenerateFailsBecauseV1Required(t *testing.T)
 		if strings.Contains(errMsg, "claude") || strings.Contains(errMsg, "executable file not found") {
 			t.Skipf("skipping: summarizer unavailable in CI: %v", err)
 		}
-		require.Contains(t, errMsg, "failed to save summary",
-			"v2-only checkpoint should fail --generate because v1 store is required")
+		require.NotContains(t, errMsg, "failed to save summary",
+			"v2-only checkpoint should persist summary via v2 store")
 	}
 }
 
