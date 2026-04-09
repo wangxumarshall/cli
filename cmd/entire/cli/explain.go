@@ -400,6 +400,18 @@ func readLatestSessionContentForExplain(ctx context.Context, reader checkpoint.C
 	return content, nil
 }
 
+// resolvePromptTree picks the best metadata tree for reading session prompts.
+// Prefers v2 when enabled (same sharded layout as v1), falls back to v1.
+func resolvePromptTree(v1Tree, v2Tree *object.Tree, preferV2 bool) *object.Tree {
+	if preferV2 && v2Tree != nil {
+		return v2Tree
+	}
+	if v1Tree != nil {
+		return v1Tree
+	}
+	return v2Tree // Last resort: use v2 even if not preferred
+}
+
 // readV2ContentFromMain reads session content from the v2 /main ref only —
 // metadata, prompts, and the compact transcript (transcript.jsonl). This is the
 // primary read path for default display modes that don't need the raw transcript
@@ -1066,10 +1078,12 @@ func getBranchCheckpoints(ctx context.Context, repo *git.Repository, limit int) 
 	// Warn (once per process) if metadata branches are disconnected
 	strategy.WarnIfMetadataDisconnected()
 
-	store := checkpoint.NewGitStore(repo)
+	v1Store := checkpoint.NewGitStore(repo)
+	v2Store := checkpoint.NewV2GitStore(repo, strategy.ResolveCheckpointURL(ctx, "origin"))
+	preferCheckpointsV2 := settings.IsCheckpointsV2Enabled(ctx)
 
-	// Get all committed checkpoints for lookup
-	committedInfos, err := store.ListCommitted(ctx)
+	// Get all committed checkpoints for lookup (v2-aware with v1 fallback).
+	committedInfos, err := listCommittedForExplain(ctx, v1Store, v2Store, preferCheckpointsV2)
 	if err != nil {
 		committedInfos = nil // Continue without committed checkpoints
 	}
@@ -1094,10 +1108,11 @@ func getBranchCheckpoints(ctx context.Context, repo *git.Repository, limit int) 
 	// Check if we're on the default branch (needed for getReachableTemporaryCheckpoints)
 	isOnDefault, _ := strategy.IsOnDefaultBranch(repo)
 
-	// Fetch metadata branch tree once for reading session prompts (cheap tree lookups).
-	// This avoids calling ReadLatestSessionContent per checkpoint which reads+parses
-	// the full JSONL transcript — extremely slow with hundreds of checkpoints.
-	metadataTree, _ := strategy.GetMetadataBranchTree(repo) //nolint:errcheck // Best-effort, continue without prompts
+	// Fetch metadata trees for reading session prompts (cheap tree lookups).
+	// Try v2 /main first, fall back to v1 metadata branch.
+	v1MetadataTree, _ := strategy.GetMetadataBranchTree(repo)   //nolint:errcheck // Best-effort
+	v2MetadataTree, _ := strategy.GetV2MetadataBranchTree(repo) //nolint:errcheck // Best-effort
+	promptTree := resolvePromptTree(v1MetadataTree, v2MetadataTree, preferCheckpointsV2)
 
 	var points []strategy.RewindPoint
 
@@ -1123,11 +1138,11 @@ func getBranchCheckpoints(ctx context.Context, repo *git.Repository, limit int) 
 			ToolUseID:        cpInfo.ToolUseID,
 			Agent:            cpInfo.Agent,
 		}
-		// Read session prompt from metadata branch tree (best-effort).
+		// Read session prompt from metadata tree (best-effort).
 		// Read prompt.txt directly from the latest session subdirectory instead of
 		// parsing the full transcript — prompt.txt is tiny vs multi-MB transcripts.
-		if metadataTree != nil {
-			point.SessionPrompt = strategy.ReadLatestSessionPromptFromCommittedTree(metadataTree, cpID, cpInfo.SessionCount)
+		if promptTree != nil {
+			point.SessionPrompt = strategy.ReadLatestSessionPromptFromCommittedTree(promptTree, cpID, cpInfo.SessionCount)
 		}
 
 		points = append(points, point)
@@ -1178,7 +1193,7 @@ func getBranchCheckpoints(ctx context.Context, repo *git.Repository, limit int) 
 	}
 
 	// Get temporary checkpoints from ALL shadow branches whose base commit is reachable from HEAD.
-	tempPoints := getReachableTemporaryCheckpoints(ctx, repo, store, head.Hash(), isOnDefault, limit)
+	tempPoints := getReachableTemporaryCheckpoints(ctx, repo, v1Store, head.Hash(), isOnDefault, limit)
 	points = append(points, tempPoints...)
 
 	// Sort by date, most recent first
