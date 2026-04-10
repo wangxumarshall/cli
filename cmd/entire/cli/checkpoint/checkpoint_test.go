@@ -3137,13 +3137,12 @@ func TestWriteCommitted_DuplicateSessionIDClearsStaleFiles(t *testing.T) {
 // highEntropySecret is a string with Shannon entropy > 4.5 that will trigger redaction.
 const highEntropySecret = "sk-ant-api03-xK9mZ2vL8nQ5rT1wY4bC7dF0gH3jE6pA"
 
-func TestWriteCommitted_RedactsTranscriptSecrets(t *testing.T) {
+func TestWriteCommitted_PreservesRedactedTranscript(t *testing.T) {
 	repo, _ := setupBranchTestRepo(t)
 	store := NewGitStore(repo)
 	checkpointID := id.MustCheckpointID("aabbccddeef1")
 
-	// Callers are responsible for redacting transcripts before passing to WriteCommitted.
-	// The store trusts that opts.Transcript is pre-redacted (enforced by RedactedBytes type).
+	// Callers redact before passing to WriteCommitted; the store persists as-is.
 	rawTranscript := []byte(`{"role":"assistant","content":"Here is your key: ` + highEntropySecret + `"}` + "\n")
 	redactedTranscript, err := redact.JSONLBytes(rawTranscript)
 	if err != nil {
