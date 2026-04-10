@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
+	"github.com/entireio/cli/cmd/entire/cli/agent/codex"
 	"github.com/entireio/cli/cmd/entire/cli/agent/types"
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint/id"
 	"github.com/entireio/cli/cmd/entire/cli/jsonutil"
@@ -24,6 +25,7 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/trailers"
 	"github.com/entireio/cli/cmd/entire/cli/validation"
 	"github.com/entireio/cli/cmd/entire/cli/versioninfo"
+	"github.com/entireio/cli/perf"
 	"github.com/entireio/cli/redact"
 
 	"github.com/go-git/go-git/v6"
@@ -59,7 +61,7 @@ func (s *GitStore) WriteCommitted(ctx context.Context, opts WriteCommittedOption
 	}
 
 	// Ensure sessions branch exists
-	if err := s.ensureSessionsBranch(); err != nil {
+	if err := s.ensureSessionsBranch(ctx); err != nil {
 		return fmt.Errorf("failed to ensure sessions branch: %w", err)
 	}
 
@@ -96,7 +98,7 @@ func (s *GitStore) WriteCommitted(ctx context.Context, opts WriteCommittedOption
 	}
 
 	// Build checkpoint subtree and splice into root (O(depth) tree surgery)
-	newTreeHash, err := s.spliceCheckpointSubtree(rootTreeHash, opts.CheckpointID, basePath, entries)
+	newTreeHash, err := s.spliceCheckpointSubtree(ctx, rootTreeHash, opts.CheckpointID, basePath, entries)
 	if err != nil {
 		return err
 	}
@@ -149,7 +151,7 @@ func (s *GitStore) flattenCheckpointEntries(rootTreeHash plumbing.Hash, checkpoi
 // at the correct shard location in the root tree using O(depth) tree surgery.
 // basePath is like "a3/b2c4d5e6f7/" (with trailing slash).
 // Returns the new root tree hash.
-func (s *GitStore) spliceCheckpointSubtree(rootTreeHash plumbing.Hash, checkpointID id.CheckpointID, basePath string, entries map[string]object.TreeEntry) (plumbing.Hash, error) {
+func (s *GitStore) spliceCheckpointSubtree(ctx context.Context, rootTreeHash plumbing.Hash, checkpointID id.CheckpointID, basePath string, entries map[string]object.TreeEntry) (plumbing.Hash, error) {
 	// Convert entries to relative paths (strip basePath prefix)
 	relEntries := make(map[string]object.TreeEntry, len(entries))
 	for path, entry := range entries {
@@ -161,7 +163,7 @@ func (s *GitStore) spliceCheckpointSubtree(rootTreeHash plumbing.Hash, checkpoin
 	}
 
 	// Build the checkpoint subtree from relative entries
-	checkpointTreeHash, err := BuildTreeFromEntries(s.repo, relEntries)
+	checkpointTreeHash, err := BuildTreeFromEntries(ctx, s.repo, relEntries)
 	if err != nil {
 		return plumbing.ZeroHash, fmt.Errorf("failed to build checkpoint subtree: %w", err)
 	}
@@ -460,7 +462,7 @@ func (s *GitStore) UpdateCheckpointSummary(ctx context.Context, checkpointID id.
 		return err //nolint:wrapcheck // Propagating context cancellation
 	}
 
-	if err := s.ensureSessionsBranch(); err != nil {
+	if err := s.ensureSessionsBranch(ctx); err != nil {
 		return fmt.Errorf("failed to ensure sessions branch: %w", err)
 	}
 
@@ -502,7 +504,7 @@ func (s *GitStore) UpdateCheckpointSummary(ctx context.Context, checkpointID id.
 		Hash: metadataHash,
 	}
 
-	newTreeHash, err := s.spliceCheckpointSubtree(rootTreeHash, checkpointID, basePath, entries)
+	newTreeHash, err := s.spliceCheckpointSubtree(ctx, rootTreeHash, checkpointID, basePath, entries)
 	if err != nil {
 		return err
 	}
@@ -627,6 +629,7 @@ func aggregateTokenUsage(a, b *agent.TokenUsage) *agent.TokenUsage {
 // writeTranscript writes the transcript file from in-memory content or file path.
 // If the transcript exceeds MaxChunkSize, it's split into multiple chunk files.
 func (s *GitStore) writeTranscript(ctx context.Context, opts WriteCommittedOptions, basePath string, entries map[string]object.TreeEntry) error {
+	logCtx := logging.WithComponent(ctx, "checkpoint")
 	transcriptBytes := opts.Transcript.Bytes()
 
 	// TranscriptPath fallback: data read from disk is an untrusted source,
@@ -650,17 +653,31 @@ func (s *GitStore) writeTranscript(ctx context.Context, opts WriteCommittedOptio
 		return nil
 	}
 
-	// Chunk the transcript if it's too large
-	chunks, err := agent.ChunkTranscript(ctx, transcriptBytes, opts.Agent)
-	if err != nil {
-		return fmt.Errorf("failed to chunk transcript: %w", err)
+	if opts.Agent == agent.AgentTypeCodex {
+		transcriptBytes = codex.SanitizePortableTranscript(transcriptBytes)
 	}
 
+	// Chunk the transcript if it's too large
+	chunkStart := time.Now()
+	chunkCtx, chunkSpan := perf.Start(ctx, "chunk_transcript")
+	chunks, err := agent.ChunkTranscript(chunkCtx, transcriptBytes, opts.Agent)
+	if err != nil {
+		chunkSpan.RecordError(err)
+		chunkSpan.End()
+		return fmt.Errorf("failed to chunk transcript: %w", err)
+	}
+	chunkSpan.End()
+	chunkDuration := time.Since(chunkStart)
+
 	// Write chunk files
+	blobStart := time.Now()
+	blobCtx, writeTranscriptBlobsSpan := perf.Start(chunkCtx, "write_transcript_blobs")
 	for i, chunk := range chunks {
 		chunkPath := basePath + agent.ChunkFileName(paths.TranscriptFileName, i)
 		blobHash, err := CreateBlobFromContent(s.repo, chunk)
 		if err != nil {
+			writeTranscriptBlobsSpan.RecordError(err)
+			writeTranscriptBlobsSpan.End()
 			return err
 		}
 		entries[chunkPath] = object.TreeEntry{
@@ -669,11 +686,17 @@ func (s *GitStore) writeTranscript(ctx context.Context, opts WriteCommittedOptio
 			Hash: blobHash,
 		}
 	}
+	writeTranscriptBlobsSpan.End()
+	blobDuration := time.Since(blobStart)
 
 	// Content hash for deduplication (hash of full transcript)
+	contentHashStart := time.Now()
+	_, contentHashSpan := perf.Start(blobCtx, "write_transcript_content_hash")
 	contentHash := fmt.Sprintf("sha256:%x", sha256.Sum256(transcriptBytes))
 	hashBlob, err := CreateBlobFromContent(s.repo, []byte(contentHash))
 	if err != nil {
+		contentHashSpan.RecordError(err)
+		contentHashSpan.End()
 		return err
 	}
 	entries[basePath+paths.ContentHashFileName] = object.TreeEntry{
@@ -681,6 +704,18 @@ func (s *GitStore) writeTranscript(ctx context.Context, opts WriteCommittedOptio
 		Mode: filemode.Regular,
 		Hash: hashBlob,
 	}
+	contentHashSpan.End()
+
+	logging.Debug(logCtx, "write transcript timings",
+		slog.String("session_id", opts.SessionID),
+		slog.String("checkpoint_id", opts.CheckpointID.String()),
+		slog.String("agent", string(opts.Agent)),
+		slog.Int64("chunk_transcript_ms", chunkDuration.Milliseconds()),
+		slog.Int64("write_transcript_blobs_ms", blobDuration.Milliseconds()),
+		slog.Int64("write_transcript_content_hash_ms", time.Since(contentHashStart).Milliseconds()),
+		slog.Int("transcript_bytes", len(transcriptBytes)),
+		slog.Int("chunk_count", len(chunks)),
+	)
 	return nil
 }
 
@@ -1117,7 +1152,7 @@ func (s *GitStore) UpdateSummary(ctx context.Context, checkpointID id.Checkpoint
 	}
 
 	// Ensure sessions branch exists
-	if err := s.ensureSessionsBranch(); err != nil {
+	if err := s.ensureSessionsBranch(ctx); err != nil {
 		return fmt.Errorf("failed to ensure sessions branch: %w", err)
 	}
 
@@ -1180,7 +1215,7 @@ func (s *GitStore) UpdateSummary(ctx context.Context, checkpointID id.Checkpoint
 	}
 
 	// Build checkpoint subtree and splice into root (O(depth) tree surgery)
-	newTreeHash, err := s.spliceCheckpointSubtree(rootTreeHash, checkpointID, basePath, entries)
+	newTreeHash, err := s.spliceCheckpointSubtree(ctx, rootTreeHash, checkpointID, basePath, entries)
 	if err != nil {
 		return err
 	}
@@ -1215,7 +1250,7 @@ func (s *GitStore) UpdateCommitted(ctx context.Context, opts UpdateCommittedOpti
 	}
 
 	// Ensure sessions branch exists
-	if err := s.ensureSessionsBranch(); err != nil {
+	if err := s.ensureSessionsBranch(ctx); err != nil {
 		return fmt.Errorf("failed to ensure sessions branch: %w", err)
 	}
 
@@ -1295,7 +1330,7 @@ func (s *GitStore) UpdateCommitted(ctx context.Context, opts UpdateCommittedOpti
 	}
 
 	// Build checkpoint subtree and splice into root (O(depth) tree surgery)
-	newTreeHash, err := s.spliceCheckpointSubtree(rootTreeHash, opts.CheckpointID, basePath, entries)
+	newTreeHash, err := s.spliceCheckpointSubtree(ctx, rootTreeHash, opts.CheckpointID, basePath, entries)
 	if err != nil {
 		return err
 	}
@@ -1364,7 +1399,7 @@ func (s *GitStore) replaceTranscript(ctx context.Context, transcript redact.Reda
 }
 
 // ensureSessionsBranch ensures the entire/checkpoints/v1 branch exists.
-func (s *GitStore) ensureSessionsBranch() error {
+func (s *GitStore) ensureSessionsBranch(ctx context.Context) error {
 	refName := plumbing.NewBranchReferenceName(paths.MetadataBranchName)
 	_, err := s.repo.Reference(refName, true)
 	if err == nil {
@@ -1372,7 +1407,7 @@ func (s *GitStore) ensureSessionsBranch() error {
 	}
 
 	// Create orphan branch with empty tree
-	emptyTreeHash, err := BuildTreeFromEntries(s.repo, make(map[string]object.TreeEntry))
+	emptyTreeHash, err := BuildTreeFromEntries(ctx, s.repo, make(map[string]object.TreeEntry))
 	if err != nil {
 		return err
 	}

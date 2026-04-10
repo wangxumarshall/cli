@@ -420,7 +420,7 @@ func benchBuildTree(entryCount int) func(*testing.B) {
 
 		b.ResetTimer()
 		for range b.N {
-			_, buildErr := checkpoint.BuildTreeFromEntries(freshRepo, entries)
+			_, buildErr := checkpoint.BuildTreeFromEntries(context.Background(), freshRepo, entries)
 			if buildErr != nil {
 				b.Fatalf("BuildTreeFromEntries: %v", buildErr)
 			}
