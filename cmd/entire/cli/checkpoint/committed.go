@@ -1272,14 +1272,10 @@ func (s *GitStore) UpdateCommitted(ctx context.Context, opts UpdateCommittedOpti
 
 	sessionPath := fmt.Sprintf("%s%d/", basePath, sessionIndex)
 
-	// Replace transcript (full replace, not append)
-	// Apply redaction as safety net (caller should redact, but we ensure it here)
+	// Replace transcript (full replace, not append).
+	// Transcript is pre-redacted by the caller (enforced by RedactedBytes type).
 	if len(opts.Transcript) > 0 {
-		redacted, err := redact.JSONLBytes(opts.Transcript)
-		if err != nil {
-			return fmt.Errorf("failed to redact transcript secrets: %w", err)
-		}
-		if err := s.replaceTranscript(ctx, redacted, opts.Agent, sessionPath, entries); err != nil {
+		if err := s.replaceTranscript(ctx, opts.Transcript, opts.Agent, sessionPath, entries); err != nil {
 			return fmt.Errorf("failed to replace transcript: %w", err)
 		}
 	}
