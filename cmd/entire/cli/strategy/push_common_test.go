@@ -826,33 +826,37 @@ func TestFetchAndRebase_URLTarget_ReconcilesFetchedTempRef(t *testing.T) {
 	assert.ErrorIs(t, err, plumbing.ErrReferenceNotFound, "temporary fetched ref should be cleaned up")
 }
 
-// TestIsSettingsTrackedByGit verifies detection of .entire/settings.json tracking status.
+// TestIsCheckpointRemoteCommitted verifies that the discoverability check reads
+// the committed content of .entire/settings.json at HEAD, not just tracking status.
 // Not parallel: uses t.Chdir().
-func TestIsSettingsTrackedByGit(t *testing.T) {
-	t.Run("untracked", func(t *testing.T) {
+func TestIsCheckpointRemoteCommitted(t *testing.T) {
+	checkpointRemoteSettings := `{"strategy_options":{"checkpoint_remote":{"provider":"github","repo":"org/checkpoints"}}}`
+
+	t.Run("false when settings.json not committed", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		testutil.InitRepo(t, tmpDir)
 		testutil.WriteFile(t, tmpDir, "f.txt", "init")
 		testutil.GitAdd(t, tmpDir, "f.txt")
 		testutil.GitCommit(t, tmpDir, "init")
 
-		// Create .entire/settings.json but don't track it
+		// Create .entire/settings.json with checkpoint_remote but don't commit it
 		entireDir := filepath.Join(tmpDir, ".entire")
 		require.NoError(t, os.MkdirAll(entireDir, 0o755))
-		require.NoError(t, os.WriteFile(filepath.Join(entireDir, "settings.json"), []byte(`{}`), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(entireDir, "settings.json"),
+			[]byte(checkpointRemoteSettings), 0o644))
 
 		t.Chdir(tmpDir)
-		assert.False(t, isSettingsTrackedByGit(context.Background()))
+		assert.False(t, isCheckpointRemoteCommitted(context.Background()))
 	})
 
-	t.Run("tracked", func(t *testing.T) {
+	t.Run("false when committed settings.json has no checkpoint_remote", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		testutil.InitRepo(t, tmpDir)
 		testutil.WriteFile(t, tmpDir, "f.txt", "init")
 		testutil.GitAdd(t, tmpDir, "f.txt")
 		testutil.GitCommit(t, tmpDir, "init")
 
-		// Create and track .entire/settings.json
+		// Commit settings.json without checkpoint_remote
 		entireDir := filepath.Join(tmpDir, ".entire")
 		require.NoError(t, os.MkdirAll(entireDir, 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(entireDir, "settings.json"), []byte(`{}`), 0o644))
@@ -860,7 +864,49 @@ func TestIsSettingsTrackedByGit(t *testing.T) {
 		testutil.GitCommit(t, tmpDir, "add settings")
 
 		t.Chdir(tmpDir)
-		assert.True(t, isSettingsTrackedByGit(context.Background()))
+		assert.False(t, isCheckpointRemoteCommitted(context.Background()))
+	})
+
+	t.Run("true when committed settings.json has checkpoint_remote", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		testutil.InitRepo(t, tmpDir)
+		testutil.WriteFile(t, tmpDir, "f.txt", "init")
+		testutil.GitAdd(t, tmpDir, "f.txt")
+		testutil.GitCommit(t, tmpDir, "init")
+
+		// Commit settings.json with checkpoint_remote
+		entireDir := filepath.Join(tmpDir, ".entire")
+		require.NoError(t, os.MkdirAll(entireDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(entireDir, "settings.json"),
+			[]byte(checkpointRemoteSettings), 0o644))
+		testutil.GitAdd(t, tmpDir, ".entire/settings.json")
+		testutil.GitCommit(t, tmpDir, "add settings")
+
+		t.Chdir(tmpDir)
+		assert.True(t, isCheckpointRemoteCommitted(context.Background()))
+	})
+
+	t.Run("false when checkpoint_remote only in local changes", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		testutil.InitRepo(t, tmpDir)
+		testutil.WriteFile(t, tmpDir, "f.txt", "init")
+		testutil.GitAdd(t, tmpDir, "f.txt")
+		testutil.GitCommit(t, tmpDir, "init")
+
+		// Commit settings.json without checkpoint_remote
+		entireDir := filepath.Join(tmpDir, ".entire")
+		require.NoError(t, os.MkdirAll(entireDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(entireDir, "settings.json"), []byte(`{}`), 0o644))
+		testutil.GitAdd(t, tmpDir, ".entire/settings.json")
+		testutil.GitCommit(t, tmpDir, "add settings without remote")
+
+		// Now add checkpoint_remote locally but don't commit
+		require.NoError(t, os.WriteFile(filepath.Join(entireDir, "settings.json"),
+			[]byte(checkpointRemoteSettings), 0o644))
+
+		t.Chdir(tmpDir)
+		assert.False(t, isCheckpointRemoteCommitted(context.Background()),
+			"uncommitted checkpoint_remote should not count as discoverable")
 	})
 
 	t.Run("works from subdirectory", func(t *testing.T) {
@@ -870,27 +916,29 @@ func TestIsSettingsTrackedByGit(t *testing.T) {
 		testutil.GitAdd(t, tmpDir, "f.txt")
 		testutil.GitCommit(t, tmpDir, "init")
 
-		// Create and track .entire/settings.json
 		entireDir := filepath.Join(tmpDir, ".entire")
 		require.NoError(t, os.MkdirAll(entireDir, 0o755))
-		require.NoError(t, os.WriteFile(filepath.Join(entireDir, "settings.json"), []byte(`{}`), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(entireDir, "settings.json"),
+			[]byte(checkpointRemoteSettings), 0o644))
 		testutil.GitAdd(t, tmpDir, ".entire/settings.json")
 		testutil.GitCommit(t, tmpDir, "add settings")
 
-		// Run from a subdirectory
 		subDir := filepath.Join(tmpDir, "subdir")
 		require.NoError(t, os.MkdirAll(subDir, 0o755))
 		t.Chdir(subDir)
-		assert.True(t, isSettingsTrackedByGit(context.Background()), "should detect tracked file from subdirectory")
+		assert.True(t, isCheckpointRemoteCommitted(context.Background()),
+			"should detect committed checkpoint_remote from subdirectory")
 	})
 }
 
 // TestPrintSettingsCommitHint verifies the hint only prints for URL targets
-// with untracked settings, and only once per process via sync.Once.
+// when checkpoint_remote is not discoverable from committed settings, and only
+// once per process via sync.Once.
 // Not parallel: uses t.Chdir() and resets package-level settingsHintOnce.
 func TestPrintSettingsCommitHint(t *testing.T) {
+	checkpointRemoteSettings := `{"strategy_options":{"checkpoint_remote":{"provider":"github","repo":"org/checkpoints"}}}`
+
 	t.Run("no hint for non-URL target", func(t *testing.T) {
-		// Reset the sync.Once for this test
 		settingsHintOnce = sync.Once{}
 
 		tmpDir := t.TempDir()
@@ -900,7 +948,6 @@ func TestPrintSettingsCommitHint(t *testing.T) {
 		testutil.GitCommit(t, tmpDir, "init")
 		t.Chdir(tmpDir)
 
-		// Capture stderr
 		old := os.Stderr
 		r, w, err := os.Pipe()
 		require.NoError(t, err)
@@ -918,7 +965,7 @@ func TestPrintSettingsCommitHint(t *testing.T) {
 		assert.Empty(t, buf.String(), "should not print hint for non-URL target")
 	})
 
-	t.Run("hint for URL target with untracked settings", func(t *testing.T) {
+	t.Run("hint when checkpoint_remote not in committed settings", func(t *testing.T) {
 		settingsHintOnce = sync.Once{}
 
 		tmpDir := t.TempDir()
@@ -927,10 +974,11 @@ func TestPrintSettingsCommitHint(t *testing.T) {
 		testutil.GitAdd(t, tmpDir, "f.txt")
 		testutil.GitCommit(t, tmpDir, "init")
 
-		// Create .entire/settings.json but don't track it
+		// Create .entire/settings.json but don't commit it
 		entireDir := filepath.Join(tmpDir, ".entire")
 		require.NoError(t, os.MkdirAll(entireDir, 0o755))
-		require.NoError(t, os.WriteFile(filepath.Join(entireDir, "settings.json"), []byte(`{}`), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(entireDir, "settings.json"),
+			[]byte(checkpointRemoteSettings), 0o644))
 		t.Chdir(tmpDir)
 
 		old := os.Stderr
@@ -947,11 +995,11 @@ func TestPrintSettingsCommitHint(t *testing.T) {
 		}
 		os.Stderr = old
 
-		assert.Contains(t, buf.String(), ".entire/settings.json is not tracked")
-		assert.Contains(t, buf.String(), "entire.io may not be able to find this checkpoint")
+		assert.Contains(t, buf.String(), "does not contain checkpoint_remote")
+		assert.Contains(t, buf.String(), "entire.io will not be able to discover")
 	})
 
-	t.Run("no hint when settings is tracked", func(t *testing.T) {
+	t.Run("hint when committed settings lacks checkpoint_remote", func(t *testing.T) {
 		settingsHintOnce = sync.Once{}
 
 		tmpDir := t.TempDir()
@@ -960,7 +1008,7 @@ func TestPrintSettingsCommitHint(t *testing.T) {
 		testutil.GitAdd(t, tmpDir, "f.txt")
 		testutil.GitCommit(t, tmpDir, "init")
 
-		// Create and track .entire/settings.json
+		// Commit settings.json without checkpoint_remote
 		entireDir := filepath.Join(tmpDir, ".entire")
 		require.NoError(t, os.MkdirAll(entireDir, 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(entireDir, "settings.json"), []byte(`{}`), 0o644))
@@ -982,7 +1030,43 @@ func TestPrintSettingsCommitHint(t *testing.T) {
 		}
 		os.Stderr = old
 
-		assert.Empty(t, buf.String(), "should not print hint when settings.json is tracked")
+		assert.Contains(t, buf.String(), "does not contain checkpoint_remote",
+			"should warn when committed settings.json exists but lacks checkpoint_remote")
+	})
+
+	t.Run("no hint when checkpoint_remote is committed", func(t *testing.T) {
+		settingsHintOnce = sync.Once{}
+
+		tmpDir := t.TempDir()
+		testutil.InitRepo(t, tmpDir)
+		testutil.WriteFile(t, tmpDir, "f.txt", "init")
+		testutil.GitAdd(t, tmpDir, "f.txt")
+		testutil.GitCommit(t, tmpDir, "init")
+
+		// Commit settings.json with checkpoint_remote
+		entireDir := filepath.Join(tmpDir, ".entire")
+		require.NoError(t, os.MkdirAll(entireDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(entireDir, "settings.json"),
+			[]byte(checkpointRemoteSettings), 0o644))
+		testutil.GitAdd(t, tmpDir, ".entire/settings.json")
+		testutil.GitCommit(t, tmpDir, "add settings with checkpoint remote")
+		t.Chdir(tmpDir)
+
+		old := os.Stderr
+		r, w, err := os.Pipe()
+		require.NoError(t, err)
+		os.Stderr = w
+
+		printSettingsCommitHint(context.Background(), "git@github.com:org/repo.git")
+
+		w.Close()
+		var buf bytes.Buffer
+		if _, readErr := buf.ReadFrom(r); readErr != nil {
+			t.Fatalf("read pipe: %v", readErr)
+		}
+		os.Stderr = old
+
+		assert.Empty(t, buf.String(), "should not print hint when checkpoint_remote is committed")
 	})
 
 	t.Run("prints only once per process", func(t *testing.T) {
@@ -993,10 +1077,6 @@ func TestPrintSettingsCommitHint(t *testing.T) {
 		testutil.WriteFile(t, tmpDir, "f.txt", "init")
 		testutil.GitAdd(t, tmpDir, "f.txt")
 		testutil.GitCommit(t, tmpDir, "init")
-
-		entireDir := filepath.Join(tmpDir, ".entire")
-		require.NoError(t, os.MkdirAll(entireDir, 0o755))
-		require.NoError(t, os.WriteFile(filepath.Join(entireDir, "settings.json"), []byte(`{}`), 0o644))
 		t.Chdir(tmpDir)
 
 		old := os.Stderr
@@ -1015,7 +1095,7 @@ func TestPrintSettingsCommitHint(t *testing.T) {
 		}
 		os.Stderr = old
 
-		count := bytes.Count(buf.Bytes(), []byte(".entire/settings.json is not tracked"))
+		count := bytes.Count(buf.Bytes(), []byte("does not contain checkpoint_remote"))
 		assert.Equal(t, 1, count, "hint should print exactly once, got %d", count)
 	})
 }
