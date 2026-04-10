@@ -1,6 +1,7 @@
 package strategy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -118,18 +119,8 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 	logCtx := logging.WithComponent(ctx, "checkpoint")
 	condenseStart := time.Now()
 
-	// Get shadow branch — use pre-resolved ref if available, otherwise resolve from repo.
 	shadowBranchName := getShadowBranchNameForCommit(state.BaseCommit, state.WorktreeID)
-	ref := o.shadowRef
-	var hasShadowBranch bool
-	if ref != nil {
-		hasShadowBranch = true
-	} else {
-		refName := plumbing.NewBranchReferenceName(shadowBranchName)
-		var err error
-		ref, err = repo.Reference(refName, true)
-		hasShadowBranch = err == nil
-	}
+	ref, hasShadowBranch := resolveShadowRef(repo, shadowBranchName, o.shadowRef)
 
 	// Re-resolve transcript path before any reads — handles agents that relocate
 	// transcripts mid-session (e.g., Cursor CLI flat → nested layout change).
@@ -175,28 +166,7 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 		state.TokenUsage = backfillUsage
 	}
 
-	// For 1:1 checkpoint model: filter files_touched to only include files actually
-	// committed in this specific commit. This ensures each checkpoint represents
-	// exactly the files in that commit, not all files mentioned in the transcript.
-	if len(committedFiles) > 0 {
-		hadFilesBeforeFiltering := len(sessionData.FilesTouched) > 0
-
-		if hadFilesBeforeFiltering {
-			filtered := make([]string, 0, len(sessionData.FilesTouched))
-			for _, f := range sessionData.FilesTouched {
-				if _, ok := committedFiles[f]; ok {
-					filtered = append(filtered, f)
-				}
-			}
-			sessionData.FilesTouched = filtered
-		} else {
-			// Mid-turn commits can happen before SaveStep records FilesTouched.
-			// In that case, fall back to the actual committed files, excluding
-			// Entire's own metadata paths, so the checkpoint still reflects the
-			// files captured by this commit.
-			sessionData.FilesTouched = committedFilesExcludingMetadata(committedFiles)
-		}
-	}
+	filterFilesTouched(sessionData, committedFiles)
 
 	// Get checkpoint store
 	store, err := s.getCheckpointStore()
@@ -260,24 +230,7 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 		Summary:                     summary,
 	}
 
-	compactRedactStart := time.Now()
-	compactCtx, compactRedactSpan := perf.Start(ctx, "redact_transcript_for_compact")
-	redactedForCompact, compactRedactErr := redact.JSONLBytes(sessionData.Transcript)
-	if compactRedactErr != nil {
-		compactRedactSpan.RecordError(compactRedactErr)
-		logging.Warn(ctx, "compact transcript redaction failed, skipping transcript.jsonl on /main",
-			slog.String("session_id", state.SessionID),
-			slog.String("error", compactRedactErr.Error()),
-		)
-		redactedForCompact = nil
-	}
-	compactRedactSpan.End()
-	compactRedactDuration := time.Since(compactRedactStart)
-	compactTranscriptStart := time.Now()
-	compactCtx, compactTranscriptSpan := perf.Start(compactCtx, "compact_transcript_v2")
-	writeOpts.CompactTranscript = compactTranscriptForV2(compactCtx, ag, redactedForCompact, state.CheckpointTranscriptStart)
-	compactTranscriptSpan.End()
-	compactTranscriptDuration := time.Since(compactTranscriptStart)
+	compactRedactDuration, compactTranscriptDuration := buildCompactTranscript(ctx, ag, sessionData, state, &writeOpts)
 
 	// Write checkpoint metadata to v1 branch
 	writeV1Start := time.Now()
@@ -310,15 +263,99 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 		slog.Int("transcript_lines", sessionData.FullTranscriptLines),
 	)
 
+	// Count scoped (new-only) compact lines, not full compact lines,
+	// so state.CompactTranscriptStart accumulates correctly.
+	compactLines := 0
+	if writeOpts.CompactTranscript != nil {
+		fullLines := countCompactLines(writeOpts.CompactTranscript)
+		compactLines = fullLines - writeOpts.CompactTranscriptStart
+	}
+
 	return &CondenseResult{
-		CheckpointID:         checkpointID,
-		SessionID:            state.SessionID,
-		CheckpointsCount:     state.StepCount,
-		FilesTouched:         sessionData.FilesTouched,
-		Prompts:              sessionData.Prompts,
-		TotalTranscriptLines: sessionData.FullTranscriptLines,
-		Transcript:           sessionData.Transcript,
+		CheckpointID:           checkpointID,
+		SessionID:              state.SessionID,
+		CheckpointsCount:       state.StepCount,
+		FilesTouched:           sessionData.FilesTouched,
+		Prompts:                sessionData.Prompts,
+		TotalTranscriptLines:   sessionData.FullTranscriptLines,
+		CompactTranscriptLines: compactLines,
+		Transcript:             sessionData.Transcript,
 	}, nil
+}
+
+// resolveShadowRef returns the shadow branch reference, preferring a pre-resolved
+// ref when available and falling back to a repo lookup.
+func resolveShadowRef(repo *git.Repository, branchName string, preResolved *plumbing.Reference) (ref *plumbing.Reference, exists bool) {
+	if preResolved != nil {
+		return preResolved, true
+	}
+	refName := plumbing.NewBranchReferenceName(branchName)
+	resolved, err := repo.Reference(refName, true)
+	if err != nil {
+		return nil, false
+	}
+	return resolved, true
+}
+
+// filterFilesTouched narrows sessionData.FilesTouched to only files present in
+// committedFiles. When no prior files were recorded (mid-turn commit), it falls
+// back to the committed set minus Entire metadata paths.
+func filterFilesTouched(sessionData *ExtractedSessionData, committedFiles map[string]struct{}) {
+	if len(committedFiles) == 0 {
+		return
+	}
+	if len(sessionData.FilesTouched) > 0 {
+		filtered := make([]string, 0, len(sessionData.FilesTouched))
+		for _, f := range sessionData.FilesTouched {
+			if _, ok := committedFiles[f]; ok {
+				filtered = append(filtered, f)
+			}
+		}
+		sessionData.FilesTouched = filtered
+	} else {
+		// Mid-turn commits can happen before SaveStep records FilesTouched.
+		// In that case, fall back to the actual committed files, excluding
+		// Entire's own metadata paths, so the checkpoint still reflects the
+		// files captured by this commit.
+		sessionData.FilesTouched = committedFilesExcludingMetadata(committedFiles)
+	}
+}
+
+// buildCompactTranscript redacts the transcript and produces compact (v2) forms
+// when v2 checkpoints are enabled. Returns per-phase durations for timing logs.
+func buildCompactTranscript(ctx context.Context, ag agent.Agent, sessionData *ExtractedSessionData, state *SessionState, writeOpts *cpkg.WriteCommittedOptions) (redactDuration, compactDuration time.Duration) {
+	redactStart := time.Now()
+	compactCtx, redactSpan := perf.Start(ctx, "redact_transcript_for_compact")
+	var redacted []byte
+	if settings.IsCheckpointsV2Enabled(ctx) {
+		var err error
+		redacted, err = redact.JSONLBytes(sessionData.Transcript)
+		if err != nil {
+			redactSpan.RecordError(err)
+			logging.Warn(ctx, "compact transcript redaction failed, skipping transcript.jsonl on /main",
+				slog.String("session_id", state.SessionID),
+				slog.String("error", err.Error()),
+			)
+			redacted = nil
+		}
+	}
+	redactSpan.End()
+	redactDuration = time.Since(redactStart)
+
+	compactStart := time.Now()
+	compactCtx, compactSpan := perf.Start(compactCtx, "compact_transcript_v2")
+	if settings.IsCheckpointsV2Enabled(ctx) {
+		// Generate scoped compact (only new content) for line counting and offset calculation.
+		scopedCompact := compactTranscriptForV2(compactCtx, ag, redacted, state.CheckpointTranscriptStart)
+		// Generate full compact (cumulative) for storage — v2 /main replaces
+		// the session's transcript.jsonl on each write, so we must include all
+		// prior content, not just the new portion.
+		writeOpts.CompactTranscript = compactTranscriptForV2(compactCtx, ag, redacted, 0)
+		writeOpts.CompactTranscriptStart = computeCompactTranscriptStart(compactCtx, ag, state, redacted, scopedCompact)
+	}
+	compactSpan.End()
+	compactDuration = time.Since(compactStart)
+	return redactDuration, compactDuration
 }
 
 // generateSummary produces an LLM-generated summary of the session transcript.
@@ -988,6 +1025,7 @@ func (s *ManualCommitStrategy) CondenseSessionByID(ctx context.Context, sessionI
 	// Update session state: reset step count and transition to idle
 	state.StepCount = 0
 	state.CheckpointTranscriptStart = result.TotalTranscriptLines
+	state.CompactTranscriptStart += result.CompactTranscriptLines
 	state.CheckpointTranscriptSize = int64(len(result.Transcript))
 	state.Phase = session.PhaseIdle
 	state.LastCheckpointID = checkpointID
@@ -1096,6 +1134,7 @@ func (s *ManualCommitStrategy) CondenseAndMarkFullyCondensed(ctx context.Context
 	// Update state — keep Phase = ENDED (unlike CondenseSessionByID which sets IDLE)
 	state.StepCount = 0
 	state.CheckpointTranscriptStart = result.TotalTranscriptLines
+	state.CompactTranscriptStart += result.CompactTranscriptLines
 	state.LastCheckpointID = checkpointID
 	state.AttributionBaseCommit = state.BaseCommit
 	state.PromptAttributions = nil
@@ -1179,6 +1218,46 @@ func compactTranscriptForV2(ctx context.Context, ag agent.Agent, transcript []by
 		return nil
 	}
 	return compacted
+}
+
+// countCompactLines returns line count for compact transcript JSONL.
+func countCompactLines(compactTranscript []byte) int {
+	return bytes.Count(compactTranscript, []byte{'\n'})
+}
+
+// computeCompactTranscriptStart chooses the compact transcript start line offset
+// for v2 /main metadata.
+//
+// Preferred source is session state CompactTranscriptStart. For legacy sessions
+// that have only full-transcript offsets persisted, this recalculates the compact
+// offset from transcript bytes when possible. On any failure, returns 0 (fail-open).
+func computeCompactTranscriptStart(ctx context.Context, ag agent.Agent, state *SessionState, transcript []byte, scopedCompact []byte) int {
+	if state.CompactTranscriptStart > 0 {
+		return state.CompactTranscriptStart
+	}
+	if state.CheckpointTranscriptStart == 0 || ag == nil || len(transcript) == 0 || len(scopedCompact) == 0 {
+		return 0
+	}
+
+	fullCompacted, err := compact.Compact(transcript, compact.MetadataFields{
+		Agent:      string(ag.Name()),
+		CLIVersion: versioninfo.Version,
+		StartLine:  0,
+	})
+	if err != nil || len(fullCompacted) == 0 {
+		logging.Warn(ctx, "failed to recalculate compact transcript start, using 0",
+			slog.String("session_id", state.SessionID),
+		)
+		return 0
+	}
+
+	fullLines := countCompactLines(fullCompacted)
+	scopedLines := countCompactLines(scopedCompact)
+	offset := fullLines - scopedLines
+	if offset < 0 {
+		return 0
+	}
+	return offset
 }
 
 // writeCommittedV2IfEnabled writes checkpoint data to v2 refs when checkpoints_v2
