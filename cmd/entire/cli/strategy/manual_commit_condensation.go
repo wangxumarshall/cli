@@ -181,6 +181,22 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 		}
 	}
 
+	// Redact the transcript once. The result is passed to both the compact
+	// package (for v2 transcript.jsonl) and the checkpoint stores (for v1
+	// and v2 full transcript). If redaction fails, the transcript is dropped
+	// to avoid persisting potentially sensitive content.
+	var redactedTranscript redact.RedactedBytes
+	if len(sessionData.Transcript) > 0 {
+		var redactErr error
+		redactedTranscript, redactErr = redact.JSONLBytes(sessionData.Transcript)
+		if redactErr != nil {
+			logging.Warn(ctx, "transcript redaction failed, dropping transcript",
+				slog.String("session_id", state.SessionID),
+				slog.String("error", redactErr.Error()),
+			)
+		}
+	}
+
 	// Get checkpoint store
 	store, err := s.getCheckpointStore()
 	if err != nil {
@@ -220,7 +236,7 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 		SessionID:                   state.SessionID,
 		Strategy:                    StrategyNameManualCommit,
 		Branch:                      branchName,
-		Transcript:                  sessionData.Transcript,
+		Transcript:                  redactedTranscript,
 		Prompts:                     sessionData.Prompts,
 		FilesTouched:                sessionData.FilesTouched,
 		CheckpointsCount:            state.StepCount,
@@ -240,15 +256,7 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 	}
 
 	if settings.IsCheckpointsV2Enabled(ctx) {
-		redactedForCompact, compactRedactErr := redact.JSONLBytes(sessionData.Transcript)
-		if compactRedactErr != nil {
-			logging.Warn(ctx, "compact transcript redaction failed, skipping transcript.jsonl on /main",
-				slog.String("session_id", state.SessionID),
-				slog.String("error", compactRedactErr.Error()),
-			)
-		} else {
-			writeOpts.CompactTranscript = compactTranscriptForV2(ctx, ag, redactedForCompact, state.CheckpointTranscriptStart)
-		}
+		writeOpts.CompactTranscript = compactTranscriptForV2(ctx, ag, redactedTranscript, state.CheckpointTranscriptStart)
 	}
 
 	// Write checkpoint metadata to v1 branch
@@ -1107,9 +1115,6 @@ func (s *ManualCommitStrategy) cleanupShadowBranchIfUnused(ctx context.Context, 
 // callers treat nil as "skip writing transcript.jsonl to /main".
 func compactTranscriptForV2(ctx context.Context, ag agent.Agent, transcript redact.RedactedBytes, checkpointTranscriptStart int) []byte {
 	if ag == nil || len(transcript) == 0 {
-		return nil
-	}
-	if !settings.IsCheckpointsV2Enabled(ctx) {
 		return nil
 	}
 
