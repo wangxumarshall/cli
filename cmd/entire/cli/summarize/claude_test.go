@@ -247,6 +247,58 @@ func TestClaudeGenerator_MarkdownCodeBlock(t *testing.T) {
 	}
 }
 
+func TestClaudeGenerator_ArrayResponse(t *testing.T) {
+	gen := &ClaudeGenerator{
+		CommandRunner: func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+			response := `[{"type":"system","subtype":"init"},{"type":"assistant","message":"Working on it"},{"type":"result","result":"{\"intent\":\"Array response intent\",\"outcome\":\"Array response outcome\",\"learnings\":{\"repo\":[],\"code\":[],\"workflow\":[]},\"friction\":[],\"open_items\":[]}"}]`
+			return exec.CommandContext(ctx, "sh", "-c", "printf '%s' '"+response+"'")
+		},
+	}
+
+	input := Input{
+		Transcript: []Entry{
+			{Type: EntryTypeUser, Content: "Summarize this"},
+		},
+	}
+
+	summary, err := gen.Generate(context.Background(), input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if summary.Intent != "Array response intent" {
+		t.Errorf("unexpected intent: %s", summary.Intent)
+	}
+
+	if summary.Outcome != "Array response outcome" {
+		t.Errorf("unexpected outcome: %s", summary.Outcome)
+	}
+}
+
+func TestClaudeGenerator_ArrayResponseWithoutResult(t *testing.T) {
+	gen := &ClaudeGenerator{
+		CommandRunner: func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+			response := `[{"type":"system","subtype":"init"},{"type":"assistant","message":"Working on it"}]`
+			return exec.CommandContext(ctx, "sh", "-c", "printf '%s' '"+response+"'")
+		},
+	}
+
+	input := Input{
+		Transcript: []Entry{
+			{Type: EntryTypeUser, Content: "Summarize this"},
+		},
+	}
+
+	_, err := gen.Generate(context.Background(), input)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	if !strings.Contains(err.Error(), "parse claude CLI response") {
+		t.Errorf("expected parse error, got: %v", err)
+	}
+}
+
 func TestBuildSummarizationPrompt(t *testing.T) {
 	transcriptText := "[User] Hello\n\n[Assistant] Hi"
 

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/entireio/cli/cmd/entire/cli/agent"
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint"
 )
 
@@ -64,11 +65,6 @@ type ClaudeGenerator struct {
 	// CommandRunner allows injection of the command execution for testing.
 	// If nil, uses exec.CommandContext directly.
 	CommandRunner func(ctx context.Context, name string, args ...string) *exec.Cmd
-}
-
-// claudeCLIResponse represents the JSON response from the Claude CLI.
-type claudeCLIResponse struct {
-	Result string `json:"result"`
 }
 
 // Generate creates a summary from checkpoint data by calling the Claude CLI.
@@ -140,14 +136,10 @@ func (g *ClaudeGenerator) Generate(ctx context.Context, input Input) (*checkpoin
 		return nil, fmt.Errorf("failed to run claude CLI: %w", err)
 	}
 
-	// Parse the CLI response
-	var cliResponse claudeCLIResponse
-	if err := json.Unmarshal(stdout.Bytes(), &cliResponse); err != nil {
+	resultJSON, err := agent.ExtractClaudeCLIResult(stdout.Bytes())
+	if err != nil {
 		return nil, fmt.Errorf("failed to parse claude CLI response: %w", err)
 	}
-
-	// The result field contains the actual JSON summary
-	resultJSON := cliResponse.Result
 
 	// Try to extract JSON if it's wrapped in markdown code blocks
 	resultJSON = extractJSONFromMarkdown(resultJSON)

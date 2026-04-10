@@ -3,13 +3,16 @@ package claudecode
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/entireio/cli/cmd/entire/cli/agent"
 )
+
+var commandContext = exec.CommandContext
 
 // GenerateText sends a prompt to the Claude CLI and returns the raw text response.
 // Implements the agent.TextGenerator interface.
@@ -21,7 +24,7 @@ func (c *ClaudeCodeAgent) GenerateText(ctx context.Context, prompt string, model
 		model = "haiku"
 	}
 
-	cmd := exec.CommandContext(ctx, claudePath,
+	cmd := commandContext(ctx, claudePath,
 		"--print", "--output-format", "json",
 		"--model", model, "--setting-sources", "")
 
@@ -47,15 +50,12 @@ func (c *ClaudeCodeAgent) GenerateText(ctx context.Context, prompt string, model
 		return "", fmt.Errorf("failed to run claude CLI: %w", err)
 	}
 
-	// Parse the {"result": "..."} envelope
-	var response struct {
-		Result string `json:"result"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+	result, err := agent.ExtractClaudeCLIResult(stdout.Bytes())
+	if err != nil {
 		return "", fmt.Errorf("failed to parse claude CLI response: %w", err)
 	}
 
-	return response.Result, nil
+	return result, nil
 }
 
 // stripGitEnv returns a copy of env with all GIT_* variables removed.
