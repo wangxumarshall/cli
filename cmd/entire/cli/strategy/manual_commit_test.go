@@ -15,7 +15,9 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint"
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint/id"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
+	"github.com/entireio/cli/cmd/entire/cli/testutil"
 	"github.com/entireio/cli/cmd/entire/cli/trailers"
+	"github.com/entireio/cli/redact"
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/go-git/go-git/v6/plumbing/object"
@@ -4097,6 +4099,82 @@ func TestCondenseSession_V2Disabled_NoV2Refs(t *testing.T) {
 
 	_, err = repo.Reference(plumbing.ReferenceName(paths.V2FullCurrentRefName), true)
 	require.Error(t, err, "v2 /full/current ref should not exist when v2 is disabled")
+}
+
+func TestCondenseSession_RedactionFailure_DropsTranscriptButWritesMetadata(t *testing.T) {
+	originalRedact := redactSessionJSONLBytes
+	redactSessionJSONLBytes = func([]byte) (redact.RedactedBytes, error) {
+		return redact.RedactedBytes{}, errors.New("forced redaction failure")
+	}
+	t.Cleanup(func() {
+		redactSessionJSONLBytes = originalRedact
+	})
+
+	dir := t.TempDir()
+	testutil.InitRepo(t, dir)
+	testutil.WriteFile(t, dir, "main.go", "package main")
+	testutil.GitAdd(t, dir, "main.go")
+	testutil.GitCommit(t, dir, "Initial commit")
+
+	repo, err := git.PlainOpen(dir)
+	require.NoError(t, err)
+
+	headRef, err := repo.Head()
+	require.NoError(t, err)
+
+	t.Chdir(dir)
+
+	s := &ManualCommitStrategy{}
+	sessionID := "2026-04-10-test-redaction-failure"
+
+	metadataDir := ".entire/metadata/" + sessionID
+	metadataDirAbs := filepath.Join(dir, metadataDir)
+	require.NoError(t, os.MkdirAll(metadataDirAbs, 0o755))
+
+	transcript := "{\"type\":\"human\",\"message\":{\"content\":\"hello\"}}\n"
+	require.NoError(t, os.WriteFile(filepath.Join(metadataDirAbs, paths.TranscriptFileName), []byte(transcript), 0o644))
+
+	err = s.SaveStep(context.Background(), StepContext{
+		SessionID:      sessionID,
+		ModifiedFiles:  []string{"main.go"},
+		MetadataDir:    metadataDir,
+		MetadataDirAbs: metadataDirAbs,
+		CommitMessage:  "Checkpoint 1",
+		AuthorName:     "Test",
+		AuthorEmail:    "test@test.com",
+	})
+	require.NoError(t, err)
+
+	state, err := s.loadSessionState(context.Background(), sessionID)
+	require.NoError(t, err)
+	state.TranscriptPath = filepath.Join(metadataDirAbs, paths.TranscriptFileName)
+	state.BaseCommit = headRef.Hash().String()[:7]
+	state.AgentType = agent.AgentTypeClaudeCode
+	state.FilesTouched = []string{"main.go"}
+
+	checkpointID := id.MustCheckpointID("aa11bb22cc33")
+	result, err := s.CondenseSession(context.Background(), repo, checkpointID, state, nil)
+	require.NoError(t, err, "redaction failure should not abort condensation")
+	require.NotNil(t, result)
+
+	store, err := s.getCheckpointStore()
+	require.NoError(t, err)
+
+	committed, err := store.ListCommitted(context.Background())
+	require.NoError(t, err)
+	require.NotEmpty(t, committed)
+
+	found := false
+	for _, c := range committed {
+		if c.CheckpointID == checkpointID {
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "checkpoint metadata should be written even when transcript redaction fails")
+
+	_, err = store.ReadLatestSessionContent(context.Background(), checkpointID)
+	require.ErrorIs(t, err, checkpoint.ErrNoTranscript, "transcript should be dropped when redaction fails")
 }
 
 func TestCommittedFilesExcludingMetadata(t *testing.T) {
