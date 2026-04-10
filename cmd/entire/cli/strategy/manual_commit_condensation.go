@@ -249,8 +249,8 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 	branchName := GetCurrentBranchName(repo)
 
 	var summary *cpkg.Summary
-	if settings.IsSummarizeEnabled(ctx) && len(sessionData.Transcript) > 0 {
-		summary = generateSummary(ctx, sessionData, state)
+	if settings.IsSummarizeEnabled(ctx) && redactedTranscript.Len() > 0 {
+		summary = generateSummary(ctx, redactedTranscript, sessionData.FilesTouched, state)
 	}
 
 	// Build write options (shared by v1 and v2)
@@ -329,14 +329,16 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 }
 
 // generateSummary produces an LLM-generated summary of the session transcript.
+// The transcript must be pre-redacted to avoid sending secrets to the LLM.
 // Returns nil if the scoped transcript is empty or generation fails.
-func generateSummary(ctx context.Context, sessionData *ExtractedSessionData, state *SessionState) *cpkg.Summary {
+func generateSummary(ctx context.Context, redactedTranscript redact.RedactedBytes, filesTouched []string, state *SessionState) *cpkg.Summary {
 	summarizeCtx := logging.WithComponent(ctx, "summarize")
+	transcriptBytes := redactedTranscript.Bytes()
 
 	var scopedTranscript []byte
 	switch state.AgentType {
 	case agent.AgentTypeGemini:
-		scoped, sliceErr := geminicli.SliceFromMessage(sessionData.Transcript, state.CheckpointTranscriptStart)
+		scoped, sliceErr := geminicli.SliceFromMessage(transcriptBytes, state.CheckpointTranscriptStart)
 		if sliceErr != nil {
 			logging.Warn(summarizeCtx, "failed to scope Gemini transcript for summary",
 				slog.String("session_id", state.SessionID),
@@ -344,7 +346,7 @@ func generateSummary(ctx context.Context, sessionData *ExtractedSessionData, sta
 		}
 		scopedTranscript = scoped
 	case agent.AgentTypeOpenCode:
-		scoped, sliceErr := opencode.SliceFromMessage(sessionData.Transcript, state.CheckpointTranscriptStart)
+		scoped, sliceErr := opencode.SliceFromMessage(transcriptBytes, state.CheckpointTranscriptStart)
 		if sliceErr != nil {
 			logging.Warn(summarizeCtx, "failed to scope OpenCode transcript for summary",
 				slog.String("session_id", state.SessionID),
@@ -352,14 +354,15 @@ func generateSummary(ctx context.Context, sessionData *ExtractedSessionData, sta
 		}
 		scopedTranscript = scoped
 	case agent.AgentTypeCodex, agent.AgentTypeClaudeCode, agent.AgentTypeCursor, agent.AgentTypeFactoryAIDroid, agent.AgentTypeUnknown:
-		scopedTranscript = transcript.SliceFromLine(sessionData.Transcript, state.CheckpointTranscriptStart)
+		scopedTranscript = transcript.SliceFromLine(transcriptBytes, state.CheckpointTranscriptStart)
 	}
 
 	if len(scopedTranscript) == 0 {
 		return nil
 	}
 
-	summary, err := summarize.GenerateFromTranscript(summarizeCtx, scopedTranscript, sessionData.FilesTouched, state.AgentType, nil)
+	// scopedTranscript is sliced from redactedTranscript, which was redacted earlier in CondenseSession.
+	summary, err := summarize.GenerateFromTranscript(summarizeCtx, redact.AlreadyRedacted(scopedTranscript), filesTouched, state.AgentType, nil)
 	if err != nil {
 		logging.Warn(summarizeCtx, "summary generation failed",
 			slog.String("session_id", state.SessionID),

@@ -116,7 +116,7 @@ func TestGenerateCheckpointAISummary_AddsDefaultTimeoutWithoutParentDeadline(t *
 	var gotDeadline time.Time
 	generateTranscriptSummary = func(
 		ctx context.Context,
-		_ []byte,
+		_ redact.RedactedBytes,
 		_ []string,
 		_ types.AgentType,
 		_ summarize.Generator,
@@ -162,7 +162,7 @@ func TestGenerateCheckpointAISummary_UsesParentDeadlineAndWrapsSentinel(t *testi
 	var gotDeadline time.Time
 	generateTranscriptSummary = func(
 		ctx context.Context,
-		_ []byte,
+		_ redact.RedactedBytes,
 		_ []string,
 		_ types.AgentType,
 		_ summarize.Generator,
@@ -206,7 +206,7 @@ func TestGenerateCheckpointAISummary_ClampsLongParentDeadlineToDefaultTimeout(t 
 	var gotDeadline time.Time
 	generateTranscriptSummary = func(
 		ctx context.Context,
-		_ []byte,
+		_ redact.RedactedBytes,
 		_ []string,
 		_ types.AgentType,
 		_ summarize.Generator,
@@ -247,7 +247,7 @@ func TestGenerateCheckpointAISummary_UsesCancellationSentinel(t *testing.T) {
 
 	generateTranscriptSummary = func(
 		ctx context.Context,
-		_ []byte,
+		_ redact.RedactedBytes,
 		_ []string,
 		_ types.AgentType,
 		_ summarize.Generator,
@@ -2922,7 +2922,7 @@ func TestScopeTranscriptForCheckpoint_CodexUsesStoredLineOffsets(t *testing.T) {
 `)
 
 	scoped := scopeTranscriptForCheckpoint(fullTranscript, 6, agent.AgentTypeCodex)
-	entries, err := summarize.BuildCondensedTranscriptFromBytes(scoped, agent.AgentTypeCodex)
+	entries, err := summarize.BuildCondensedTranscriptFromBytes(redact.AlreadyRedacted(scoped), agent.AgentTypeCodex)
 	if err != nil {
 		t.Fatalf("failed to build condensed transcript: %v", err)
 	}

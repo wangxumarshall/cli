@@ -31,8 +31,8 @@ import (
 //   - generator: summary generator to use (if nil, uses default ClaudeGenerator)
 //
 // Returns nil, error if transcript is empty or cannot be parsed.
-func GenerateFromTranscript(ctx context.Context, transcriptBytes []byte, filesTouched []string, agentType types.AgentType, generator Generator) (*checkpoint.Summary, error) {
-	if len(transcriptBytes) == 0 {
+func GenerateFromTranscript(ctx context.Context, transcriptBytes redact.RedactedBytes, filesTouched []string, agentType types.AgentType, generator Generator) (*checkpoint.Summary, error) {
+	if transcriptBytes.Len() == 0 {
 		return nil, errors.New("empty transcript")
 	}
 
@@ -117,7 +117,7 @@ var minimalDetailTools = map[string]bool{
 // BuildCondensedTranscriptFromBytes parses transcript bytes and extracts a condensed view.
 // This is a convenience function that combines parsing and condensing.
 // The agentType parameter determines which parser to use (Claude/OpenCode JSONL vs Gemini JSON).
-func BuildCondensedTranscriptFromBytes(content []byte, agentType types.AgentType) ([]Entry, error) {
+func BuildCondensedTranscriptFromBytes(content redact.RedactedBytes, agentType types.AgentType) ([]Entry, error) {
 	switch agentType {
 	case agent.AgentTypeGemini:
 		return buildCondensedTranscriptFromGemini(content)
@@ -131,7 +131,7 @@ func BuildCondensedTranscriptFromBytes(content []byte, agentType types.AgentType
 		// Claude/cursor format - fall through to shared logic below
 	}
 	// Claude format (JSONL) - handles Claude Code, Unknown, and any future agent types
-	lines, err := transcript.ParseFromBytes(content)
+	lines, err := transcript.ParseFromBytes(content.Bytes())
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse transcript: %w", err)
 	}
@@ -139,8 +139,8 @@ func BuildCondensedTranscriptFromBytes(content []byte, agentType types.AgentType
 }
 
 // buildCondensedTranscriptFromGemini parses Gemini JSON transcript and extracts a condensed view.
-func buildCondensedTranscriptFromGemini(content []byte) ([]Entry, error) {
-	geminiTranscript, err := geminicli.ParseTranscript(content)
+func buildCondensedTranscriptFromGemini(redacted redact.RedactedBytes) ([]Entry, error) {
+	geminiTranscript, err := geminicli.ParseTranscript(redacted.Bytes())
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse Gemini transcript: %w", err)
 	}
@@ -178,8 +178,8 @@ func buildCondensedTranscriptFromGemini(content []byte) ([]Entry, error) {
 }
 
 // buildCondensedTranscriptFromOpenCode parses OpenCode export JSON transcript and extracts a condensed view.
-func buildCondensedTranscriptFromOpenCode(content []byte) ([]Entry, error) {
-	session, err := opencode.ParseExportSession(content)
+func buildCondensedTranscriptFromOpenCode(redacted redact.RedactedBytes) ([]Entry, error) {
+	session, err := opencode.ParseExportSession(redacted.Bytes())
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse OpenCode transcript: %w", err)
 	}
@@ -223,8 +223,8 @@ func buildCondensedTranscriptFromOpenCode(content []byte) ([]Entry, error) {
 
 // buildCondensedTranscriptFromCodex converts Codex rollout JSONL into the compact
 // transcript format, then reuses the shared transcript condensation logic.
-func buildCondensedTranscriptFromCodex(content []byte) ([]Entry, error) {
-	compacted, err := compact.Compact(redact.AlreadyRedacted(content), compact.MetadataFields{
+func buildCondensedTranscriptFromCodex(content redact.RedactedBytes) ([]Entry, error) {
+	compacted, err := compact.Compact(content, compact.MetadataFields{
 		Agent:      "codex",
 		CLIVersion: "summarize",
 	})
@@ -300,8 +300,8 @@ func buildCondensedTranscriptFromCodex(content []byte) ([]Entry, error) {
 }
 
 // buildCondensedTranscriptFromDroid parses Droid transcript and extracts a condensed view.
-func buildCondensedTranscriptFromDroid(content []byte) ([]Entry, error) {
-	droidLines, _, err := factoryaidroid.ParseDroidTranscriptFromBytes(content, 0)
+func buildCondensedTranscriptFromDroid(redacted redact.RedactedBytes) ([]Entry, error) {
+	droidLines, _, err := factoryaidroid.ParseDroidTranscriptFromBytes(redacted.Bytes(), 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse Droid transcript: %w", err)
 	}
