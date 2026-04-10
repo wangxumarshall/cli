@@ -247,7 +247,7 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 				slog.String("error", compactRedactErr.Error()),
 			)
 		} else {
-			writeOpts.CompactTranscript = compactTranscriptForV2(ctx, ag, redactedForCompact.Bytes(), state.CheckpointTranscriptStart)
+			writeOpts.CompactTranscript = compactTranscriptForV2(ctx, ag, redactedForCompact, state.CheckpointTranscriptStart)
 		}
 	}
 
@@ -1105,7 +1105,7 @@ func (s *ManualCommitStrategy) cleanupShadowBranchIfUnused(ctx context.Context, 
 // from a redacted agent transcript. Returns nil if compaction cannot be performed
 // (nil agent, empty transcript, or compaction error) —
 // callers treat nil as "skip writing transcript.jsonl to /main".
-func compactTranscriptForV2(ctx context.Context, ag agent.Agent, transcript []byte, checkpointTranscriptStart int) []byte {
+func compactTranscriptForV2(ctx context.Context, ag agent.Agent, transcript redact.RedactedBytes, checkpointTranscriptStart int) []byte {
 	if ag == nil || len(transcript) == 0 {
 		return nil
 	}

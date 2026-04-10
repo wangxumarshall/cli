@@ -16,6 +16,7 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/strategy"
 	"github.com/entireio/cli/cmd/entire/cli/transcript/compact"
 	"github.com/entireio/cli/cmd/entire/cli/versioninfo"
+	"github.com/entireio/cli/redact"
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/go-git/go-git/v6/plumbing/object"
@@ -422,7 +423,7 @@ func tryCompactTranscript(ctx context.Context, transcript []byte, m checkpoint.C
 		return nil
 	}
 
-	compacted, err := compact.Compact(transcript, compact.MetadataFields{
+	compacted, err := compact.Compact(redact.AlreadyRedacted(transcript), compact.MetadataFields{
 		Agent:      string(m.Agent),
 		CLIVersion: versioninfo.Version,
 		StartLine:  m.GetTranscriptStart(),

@@ -2537,7 +2537,7 @@ func (s *ManualCommitStrategy) finalizeAllTurnCheckpoints(ctx context.Context, s
 					slog.String("error", errMsg),
 				)
 			}
-			updateOpts.CompactTranscript = compactTranscriptForV2(logCtx, finalAg, fullTranscript, startLine)
+			updateOpts.CompactTranscript = compactTranscriptForV2(logCtx, finalAg, redact.AlreadyRedacted(fullTranscript), startLine)
 		}
 
 		updateErr := store.UpdateCommitted(ctx, updateOpts)

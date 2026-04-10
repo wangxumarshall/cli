@@ -12,6 +12,7 @@ import (
 
 	"github.com/entireio/cli/cmd/entire/cli/textutil"
 	"github.com/entireio/cli/cmd/entire/cli/transcript"
+	"github.com/entireio/cli/redact"
 )
 
 // MetadataFields provides metadata fields written to every output line.
@@ -75,7 +76,12 @@ type userTextBlock struct {
 //
 //	{"v":1,"agent":"claude-code","cli_version":"0.42.0","type":"user","ts":"...","content":"..."}
 //	{"v":1,"agent":"claude-code","cli_version":"0.42.0","type":"assistant","ts":"...","id":"msg_xxx","content":[{"type":"text","text":"..."},{"type":"tool_use","id":"...","name":"...","input":{...},"result":{"output":"...","status":"..."}}]}
-func Compact(content []byte, opts MetadataFields) ([]byte, error) {
+// Compact converts a full agent transcript into the normalized Entire Transcript
+// Format (transcript.jsonl). The input must be pre-redacted — callers are
+// responsible for running redact.JSONLBytes before calling this function.
+func Compact(redacted redact.RedactedBytes, opts MetadataFields) ([]byte, error) {
+	content := redacted.Bytes()
+
 	// Formats that need detection on raw content before line truncation:
 	// - Single-object formats (OpenCode, Gemini): SliceFromLine would cut
 	//   a JSON object mid-value. They handle StartLine as a message-index offset.
