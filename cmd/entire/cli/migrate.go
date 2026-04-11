@@ -17,6 +17,7 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/strategy"
 	"github.com/entireio/cli/cmd/entire/cli/transcript/compact"
 	"github.com/entireio/cli/cmd/entire/cli/versioninfo"
+	"github.com/entireio/cli/redact"
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/go-git/go-git/v6/plumbing/object"
@@ -261,9 +262,11 @@ func repairPartialV2Checkpoint(ctx context.Context, repo *git.Repository, v1Stor
 		updateOpts := checkpoint.UpdateCommittedOptions{
 			CheckpointID: info.CheckpointID,
 			SessionID:    content.Metadata.SessionID,
-			Transcript:   content.Transcript,
-			Prompts:      checkpoint.SplitPromptContent(content.Prompts),
-			Agent:        content.Metadata.Agent,
+			// content.Transcript was read from v1 checkpoint storage and is
+			// already redacted at write time.
+			Transcript: redact.AlreadyRedacted(content.Transcript),
+			Prompts:    checkpoint.SplitPromptContent(content.Prompts),
+			Agent:      content.Metadata.Agent,
 		}
 		if compacted := tryCompactTranscript(ctx, content.Transcript, content.Metadata); compacted != nil {
 			updateOpts.CompactTranscript = compacted
@@ -395,11 +398,13 @@ func buildMigrateWriteOpts(content *checkpoint.SessionContent, info checkpoint.C
 	prompts := checkpoint.SplitPromptContent(content.Prompts)
 
 	return checkpoint.WriteCommittedOptions{
-		CheckpointID:                info.CheckpointID,
-		SessionID:                   m.SessionID,
-		Strategy:                    m.Strategy,
-		Branch:                      m.Branch,
-		Transcript:                  content.Transcript,
+		CheckpointID: info.CheckpointID,
+		SessionID:    m.SessionID,
+		Strategy:     m.Strategy,
+		Branch:       m.Branch,
+		// content.Transcript comes from persisted checkpoint storage and is
+		// already redacted.
+		Transcript:                  redact.AlreadyRedacted(content.Transcript),
 		Prompts:                     prompts,
 		FilesTouched:                m.FilesTouched,
 		CheckpointsCount:            m.CheckpointsCount,
@@ -434,7 +439,8 @@ func compactTranscriptForStartLine(ctx context.Context, transcript []byte, m che
 		return nil
 	}
 
-	compacted, err := compact.Compact(transcript, compact.MetadataFields{
+	// transcript is read from persisted checkpoint storage and already redacted.
+	compacted, err := compact.Compact(redact.AlreadyRedacted(transcript), compact.MetadataFields{
 		Agent:      string(m.Agent),
 		CLIVersion: versioninfo.Version,
 		StartLine:  startLine,
@@ -471,7 +477,8 @@ func computeCompactOffset(ctx context.Context, fullTranscript, fullCompact []byt
 		return 0
 	}
 
-	scopedCompact, err := compact.Compact(fullTranscript, compact.MetadataFields{
+	// fullTranscript is read from persisted checkpoint storage and already redacted.
+	scopedCompact, err := compact.Compact(redact.AlreadyRedacted(fullTranscript), compact.MetadataFields{
 		Agent:      string(m.Agent),
 		CLIVersion: versioninfo.Version,
 		StartLine:  startLine,

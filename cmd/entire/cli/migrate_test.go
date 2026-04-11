@@ -15,6 +15,7 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/testutil"
 	"github.com/entireio/cli/cmd/entire/cli/transcript/compact"
 	"github.com/entireio/cli/cmd/entire/cli/versioninfo"
+	"github.com/entireio/cli/redact"
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/go-git/go-git/v6/plumbing/filemode"
@@ -45,7 +46,7 @@ func writeV1Checkpoint(t *testing.T, store *checkpoint.GitStore, cpID id.Checkpo
 		CheckpointID: cpID,
 		SessionID:    sessionID,
 		Strategy:     "manual-commit",
-		Transcript:   transcript,
+		Transcript:   redact.AlreadyRedacted(transcript),
 		Prompts:      prompts,
 		AuthorName:   "Test",
 		AuthorEmail:  "test@test.com",
@@ -270,7 +271,7 @@ func TestMigrateCheckpointsV2_CompactionSkipped(t *testing.T) {
 		CheckpointID: cpID,
 		SessionID:    "session-noagent",
 		Strategy:     "manual-commit",
-		Transcript:   []byte("{\"type\":\"assistant\",\"message\":\"no agent\"}\n"),
+		Transcript:   redact.AlreadyRedacted([]byte("{\"type\":\"assistant\",\"message\":\"no agent\"}\n")),
 		Prompts:      []string{"compact fail prompt"},
 		AuthorName:   "Test",
 		AuthorEmail:  "test@test.com",
@@ -295,7 +296,7 @@ func TestMigrateCheckpointsV2_TaskCheckpoint(t *testing.T) {
 		CheckpointID: cpID,
 		SessionID:    "session-task-001",
 		Strategy:     "manual-commit",
-		Transcript:   []byte("{\"type\":\"assistant\",\"message\":\"task work\"}\n"),
+		Transcript:   redact.AlreadyRedacted([]byte("{\"type\":\"assistant\",\"message\":\"task work\"}\n")),
 		Prompts:      []string{"task prompt"},
 		IsTask:       true,
 		ToolUseID:    "toolu_01ABC",
@@ -367,7 +368,7 @@ func TestMigrateCheckpointsV2_BackfillCompactTranscript(t *testing.T) {
 		CheckpointID: cpID,
 		SessionID:    "session-backfill",
 		Strategy:     "manual-commit",
-		Transcript:   []byte("{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hello\"}}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n"),
+		Transcript:   redact.AlreadyRedacted([]byte("{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hello\"}}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n")),
 		Prompts:      []string{"hello"},
 		Agent:        "Claude Code",
 		AuthorName:   "Test",
@@ -380,7 +381,7 @@ func TestMigrateCheckpointsV2_BackfillCompactTranscript(t *testing.T) {
 		CheckpointID: cpID,
 		SessionID:    "session-backfill",
 		Strategy:     "manual-commit",
-		Transcript:   []byte("{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hello\"}}\n"),
+		Transcript:   redact.AlreadyRedacted([]byte("{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hello\"}}\n")),
 		Prompts:      []string{"hello"},
 		Agent:        "Claude Code",
 		AuthorName:   "Test",
@@ -427,7 +428,7 @@ func TestMigrateCheckpointsV2_UsesComputedCompactTranscriptStart(t *testing.T) {
 		CheckpointID:              cpID,
 		SessionID:                 "session-compact-start-migrate",
 		Strategy:                  "manual-commit",
-		Transcript:                transcript,
+		Transcript:                redact.AlreadyRedacted(transcript),
 		Prompts:                   []string{"prompt 2"},
 		Agent:                     agent.AgentTypeClaudeCode,
 		CheckpointTranscriptStart: 2, // full transcript line domain
@@ -440,7 +441,7 @@ func TestMigrateCheckpointsV2_UsesComputedCompactTranscriptStart(t *testing.T) {
 	require.NoError(t, err)
 	fullCompacted := tryCompactTranscript(ctx, v1Content.Transcript, v1Content.Metadata)
 	require.NotNil(t, fullCompacted)
-	scopedCompacted, err := compact.Compact(v1Content.Transcript, compact.MetadataFields{
+	scopedCompacted, err := compact.Compact(redact.AlreadyRedacted(v1Content.Transcript), compact.MetadataFields{
 		Agent:      string(v1Content.Metadata.Agent),
 		CLIVersion: versioninfo.Version,
 		StartLine:  v1Content.Metadata.GetTranscriptStart(),
@@ -618,7 +619,7 @@ func TestSpliceTasksTreeToV2_MergesTaskDirectories(t *testing.T) {
 		SessionID:    "session-001",
 		Strategy:     "manual-commit",
 		Agent:        "Cursor",
-		Transcript:   []byte(`{"type":"assistant","message":"seed"}`),
+		Transcript:   redact.AlreadyRedacted([]byte(`{"type":"assistant","message":"seed"}`)),
 		AuthorName:   "Test",
 		AuthorEmail:  "test@test.com",
 	})
