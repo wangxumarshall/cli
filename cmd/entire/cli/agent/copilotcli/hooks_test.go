@@ -61,7 +61,7 @@ func TestInstallHooks_FreshInstall(t *testing.T) {
 
 	// Verify commands use bash field and type is "command"
 	assertEntryBash(t, hooksFile.Hooks.UserPromptSubmitted, agent.WrapProductionSilentHookCommand("entire hooks copilot-cli user-prompt-submitted"))
-	assertEntryBash(t, hooksFile.Hooks.SessionStart, agent.WrapProductionSessionStartHookCommand("entire hooks copilot-cli session-start", agent.WarningFormatSingleLine))
+	assertEntryBash(t, hooksFile.Hooks.SessionStart, agent.WrapProductionSilentHookCommand("entire hooks copilot-cli session-start"))
 	assertEntryBash(t, hooksFile.Hooks.AgentStop, agent.WrapProductionSilentHookCommand("entire hooks copilot-cli agent-stop"))
 	assertEntryBash(t, hooksFile.Hooks.SessionEnd, agent.WrapProductionSilentHookCommand("entire hooks copilot-cli session-end"))
 	assertEntryBash(t, hooksFile.Hooks.SubagentStop, agent.WrapProductionSilentHookCommand("entire hooks copilot-cli subagent-stop"))

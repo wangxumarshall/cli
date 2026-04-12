@@ -112,9 +112,7 @@ func (c *CopilotCLIAgent) InstallHooks(ctx context.Context, localDev bool, force
 	// Add hooks that don't already exist
 	for _, hookName := range c.HookNames() {
 		cmd := cmdPrefix + hookName
-		if !localDev && hookName == HookNameSessionStart {
-			cmd = agent.WrapProductionSessionStartHookCommand(cmd, agent.WarningFormatSingleLine)
-		} else if !localDev {
+		if !localDev {
 			cmd = agent.WrapProductionSilentHookCommand(cmd)
 		}
 		entries := hookEntries[hookName]
