@@ -127,8 +127,8 @@ func TestAddGenerationJSONToTree(t *testing.T) {
 
 	// Start with a root tree that has a shard directory entry (simulating checkpoint data)
 	shardEntries := map[string]object.TreeEntry{}
-	shardEntries["aa/bbccddeeff/0/full.jsonl"] = object.TreeEntry{
-		Name: "full.jsonl",
+	shardEntries["aa/bbccddeeff/0/"+paths.V2RawTranscriptFileName] = object.TreeEntry{
+		Name: paths.V2RawTranscriptFileName,
 		Mode: 0o100644,
 		Hash: plumbing.ZeroHash, // dummy
 	}

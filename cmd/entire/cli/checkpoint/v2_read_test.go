@@ -195,7 +195,7 @@ func TestV2ReadSessionContent_ChunkedTranscript(t *testing.T) {
 	require.NoError(t, err)
 
 	// Manually write chunked transcript to /full/current:
-	// chunk 0 = full.jsonl (base file), chunk 1 = full.jsonl.001
+	// chunk 0 = raw_transcript (base file), chunk 1 = raw_transcript.001
 	chunk0 := []byte(`{"line":"one"}` + "\n" + `{"line":"two"}`)
 	chunk1 := []byte(`{"line":"three"}` + "\n" + `{"line":"four"}`)
 
