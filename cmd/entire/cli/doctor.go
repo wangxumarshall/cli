@@ -362,6 +362,34 @@ func checkDisconnectedMetadata(cmd *cobra.Command, force bool) error {
 	return nil
 }
 
+// checkV2RefExistence verifies that v2 refs exist (or both are absent for a fresh repo).
+// One ref without the other suggests a partial initialization.
+func checkV2RefExistence(cmd *cobra.Command, repo *git.Repository) error {
+	w := cmd.OutOrStdout()
+
+	mainRefName := plumbing.ReferenceName(paths.V2MainRefName)
+	fullRefName := plumbing.ReferenceName(paths.V2FullCurrentRefName)
+
+	_, mainErr := repo.Reference(mainRefName, true)
+	_, fullErr := repo.Reference(fullRefName, true)
+
+	hasMain := mainErr == nil
+	hasFull := fullErr == nil
+
+	switch {
+	case hasMain && hasFull:
+		fmt.Fprintln(w, "✓ v2 refs: OK")
+	case !hasMain && !hasFull:
+		fmt.Fprintln(w, "✓ v2 refs: OK (no checkpoints written yet)")
+	case hasMain && !hasFull:
+		fmt.Fprintln(w, "v2 refs: INCONSISTENT — /main exists but /full/current is missing")
+	case !hasMain && hasFull:
+		fmt.Fprintln(w, "v2 refs: INCONSISTENT — /full/current exists but /main is missing")
+	}
+
+	return nil
+}
+
 // canDeleteShadowBranch checks if a shadow branch can be safely deleted.
 // Returns true if no other sessions (besides excludeSessionID) need this branch.
 func canDeleteShadowBranch(ctx context.Context, shadowBranch, excludeSessionID string) (bool, error) {

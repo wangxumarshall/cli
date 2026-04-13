@@ -20,6 +20,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// createV2Ref creates a v2 custom ref with an empty tree commit.
+// Works for refs/entire/checkpoints/v2/main, refs/entire/checkpoints/v2/full/current, etc.
+func createV2Ref(t *testing.T, repo *git.Repository, refName string) {
+	t.Helper()
+
+	emptyTree := &object.Tree{Entries: []object.TreeEntry{}}
+	treeObj := repo.Storer.NewEncodedObject()
+	require.NoError(t, emptyTree.Encode(treeObj))
+	treeHash, err := repo.Storer.SetEncodedObject(treeObj)
+	require.NoError(t, err)
+
+	commitObj := &object.Commit{
+		Author:    object.Signature{Name: "test", Email: "test@test.com", When: time.Now()},
+		Committer: object.Signature{Name: "test", Email: "test@test.com", When: time.Now()},
+		Message:   "init v2 ref",
+		TreeHash:  treeHash,
+	}
+	enc := repo.Storer.NewEncodedObject()
+	require.NoError(t, commitObj.Encode(enc))
+	commitHash, err := repo.Storer.SetEncodedObject(enc)
+	require.NoError(t, err)
+
+	ref := plumbing.NewHashReference(plumbing.ReferenceName(refName), commitHash)
+	require.NoError(t, repo.Storer.SetReference(ref))
+}
+
 // testBaseCommit is a fake commit hash used across classifySession tests.
 const testBaseCommit = "abcdef1234567890abcdef1234567890abcdef12"
 
@@ -290,6 +316,84 @@ func TestClassifySession_WorktreeIDInShadowBranch(t *testing.T) {
 	assert.True(t, result.HasShadowBranch)
 	expectedBranch := checkpoint.ShadowBranchNameForCommit(baseCommit, worktreeID)
 	assert.Equal(t, expectedBranch, result.ShadowBranch)
+}
+
+func TestCheckV2RefExistence_BothExist(t *testing.T) {
+	t.Parallel()
+	dir := setupGitRepoForPhaseTest(t)
+	repo, err := git.PlainOpen(dir)
+	require.NoError(t, err)
+
+	createV2Ref(t, repo, paths.V2MainRefName)
+	createV2Ref(t, repo, paths.V2FullCurrentRefName)
+
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+
+	err = checkV2RefExistence(cmd, repo)
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), "v2 refs: OK")
+	assert.Empty(t, stderr.String())
+}
+
+func TestCheckV2RefExistence_NeitherExist(t *testing.T) {
+	t.Parallel()
+	dir := setupGitRepoForPhaseTest(t)
+	repo, err := git.PlainOpen(dir)
+	require.NoError(t, err)
+
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+
+	err = checkV2RefExistence(cmd, repo)
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), "no checkpoints written yet")
+}
+
+func TestCheckV2RefExistence_OnlyMainExists(t *testing.T) {
+	t.Parallel()
+	dir := setupGitRepoForPhaseTest(t)
+	repo, err := git.PlainOpen(dir)
+	require.NoError(t, err)
+
+	createV2Ref(t, repo, paths.V2MainRefName)
+
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+
+	err = checkV2RefExistence(cmd, repo)
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), "INCONSISTENT")
+	assert.Contains(t, stdout.String(), "/full/current is missing")
+}
+
+func TestCheckV2RefExistence_OnlyFullCurrentExists(t *testing.T) {
+	t.Parallel()
+	dir := setupGitRepoForPhaseTest(t)
+	repo, err := git.PlainOpen(dir)
+	require.NoError(t, err)
+
+	createV2Ref(t, repo, paths.V2FullCurrentRefName)
+
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+
+	err = checkV2RefExistence(cmd, repo)
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), "INCONSISTENT")
+	assert.Contains(t, stdout.String(), "/main is missing")
 }
 
 // TestRunSessionsFix_MetadataCheckFailure_PropagatesError verifies that when
