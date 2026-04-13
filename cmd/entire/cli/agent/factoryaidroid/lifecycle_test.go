@@ -176,6 +176,42 @@ func TestParseHookEvent_SubagentEnd(t *testing.T) {
 	}
 }
 
+func TestParseHookEvent_SubagentStart_MissingToolUseID(t *testing.T) {
+	t.Parallel()
+
+	ag := &FactoryAIDroidAgent{}
+	input := `{"session_id": "sess-4", "transcript_path": "/tmp/t.jsonl", "tool_name": "Task", "tool_input": {"prompt": "do something"}}`
+
+	event, err := ag.ParseHookEvent(context.Background(), HookNamePreToolUse, strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if event.ToolUseID == "" {
+		t.Fatal("expected fallback tool_use_id, got empty string")
+	}
+}
+
+func TestParseHookEvent_SubagentEnd_StringToolResponse(t *testing.T) {
+	t.Parallel()
+
+	ag := &FactoryAIDroidAgent{}
+	input := `{"session_id": "sess-5", "transcript_path": "/tmp/t.jsonl", "tool_name": "Task", "tool_input": {}, "tool_response": "agentId: agent-789"}`
+
+	event, err := ag.ParseHookEvent(context.Background(), HookNamePostToolUse, strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if event.Type != agent.SubagentEnd {
+		t.Errorf("expected SubagentEnd, got %v", event.Type)
+	}
+	if event.SubagentID != "agent-789" {
+		t.Errorf("expected SubagentID 'agent-789', got %q", event.SubagentID)
+	}
+	if event.ToolUseID == "" {
+		t.Fatal("expected fallback tool_use_id, got empty string")
+	}
+}
+
 func TestParseHookEvent_Compaction(t *testing.T) {
 	t.Parallel()
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
@@ -231,11 +232,15 @@ func (f *FactoryAIDroidAgent) parseSubagentStart(stdin io.Reader) (*agent.Event,
 	if err != nil {
 		return nil, err
 	}
+	toolUseID := raw.ToolUseID
+	if toolUseID == "" {
+		toolUseID = fallbackToolUseID(raw.SessionID, raw.ToolName, raw.ToolInput)
+	}
 	return &agent.Event{
 		Type:       agent.SubagentStart,
 		SessionID:  raw.SessionID,
 		SessionRef: raw.TranscriptPath,
-		ToolUseID:  raw.ToolUseID,
+		ToolUseID:  toolUseID,
 		ToolInput:  raw.ToolInput,
 		Timestamp:  time.Now(),
 	}, nil
@@ -246,16 +251,20 @@ func (f *FactoryAIDroidAgent) parseSubagentEnd(stdin io.Reader) (*agent.Event, e
 	if err != nil {
 		return nil, err
 	}
+	toolUseID := raw.ToolUseID
+	if toolUseID == "" {
+		toolUseID = fallbackToolUseID(raw.SessionID, raw.ToolName, raw.ToolInput)
+	}
 	event := &agent.Event{
 		Type:       agent.SubagentEnd,
 		SessionID:  raw.SessionID,
 		SessionRef: raw.TranscriptPath,
-		ToolUseID:  raw.ToolUseID,
+		ToolUseID:  toolUseID,
 		ToolInput:  raw.ToolInput,
 		Timestamp:  time.Now(),
 	}
-	if raw.ToolResponse.AgentID != "" {
-		event.SubagentID = raw.ToolResponse.AgentID
+	if agentID := parseHookToolResponseAgentID(raw.ToolResponse); agentID != "" {
+		event.SubagentID = agentID
 	}
 	return event, nil
 }
@@ -271,4 +280,45 @@ func (f *FactoryAIDroidAgent) parseCompaction(stdin io.Reader) (*agent.Event, er
 		SessionRef: raw.TranscriptPath,
 		Timestamp:  time.Now(),
 	}, nil
+}
+
+func parseHookToolResponseAgentID(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+
+	var obj struct {
+		AgentID string `json:"agentId"`
+	}
+	if err := json.Unmarshal(raw, &obj); err == nil && obj.AgentID != "" {
+		return obj.AgentID
+	}
+
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return extractHookToolResponseAgentID(text)
+	}
+
+	return ""
+}
+
+func extractHookToolResponseAgentID(text string) string {
+	const prefix = "agentId: "
+	_, after, found := strings.Cut(text, prefix)
+	if !found {
+		return ""
+	}
+
+	after = strings.TrimSpace(after)
+	end := 0
+	for end < len(after) {
+		ch := after[end]
+		if ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || ch == '-' || ch == '_' {
+			end++
+			continue
+		}
+		break
+	}
+
+	return after[:end]
 }
