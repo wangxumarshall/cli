@@ -242,6 +242,100 @@ func IsV2MainDisconnected(ctx context.Context, repo *git.Repository, remote stri
 	return isDisconnected(ctx, repoPath, localRef.Hash().String(), remoteHash.String())
 }
 
+// ReconcileDisconnectedV2Ref detects and repairs disconnected local/remote
+// v2 /main refs. Same strategy as v1: cherry-pick local commits onto remote tip.
+// The remote is discovered via git ls-remote and fetched to a temp ref.
+//
+// remote is the git remote URL or path.
+func ReconcileDisconnectedV2Ref(
+	ctx context.Context,
+	repo *git.Repository,
+	remote string,
+	w io.Writer,
+) error {
+	refName := plumbing.ReferenceName(paths.V2MainRefName)
+
+	localRef, err := repo.Reference(refName, true)
+	if errors.Is(err, plumbing.ErrReferenceNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to check local v2 /main ref: %w", err)
+	}
+
+	repoPath, err := getRepoPath(repo)
+	if err != nil {
+		return err
+	}
+
+	remoteHash, err := lsRemoteRef(ctx, repoPath, remote, paths.V2MainRefName)
+	if err != nil {
+		return fmt.Errorf("failed to ls-remote v2 /main: %w", err)
+	}
+	if remoteHash == plumbing.ZeroHash {
+		return nil
+	}
+
+	if localRef.Hash() == remoteHash {
+		return nil
+	}
+
+	if fetchErr := fetchRefToTemp(ctx, repoPath, remote, paths.V2MainRefName, v2DoctorTmpRef); fetchErr != nil {
+		return fmt.Errorf("failed to fetch remote v2 /main: %w", fetchErr)
+	}
+	defer cleanupTmpRef(repo)
+
+	disconnected, err := isDisconnected(ctx, repoPath, localRef.Hash().String(), remoteHash.String())
+	if err != nil {
+		return fmt.Errorf("failed to check v2 /main ancestry: %w", err)
+	}
+	if !disconnected {
+		return nil
+	}
+
+	fmt.Fprintln(w, "[entire] Detected disconnected v2 /main refs (local and remote share no common ancestor)")
+
+	localCommits, err := collectCommitChain(repo, localRef.Hash())
+	if err != nil {
+		return fmt.Errorf("failed to collect local commits: %w", err)
+	}
+
+	var dataCommits []*object.Commit
+	for _, c := range localCommits {
+		tree, treeErr := c.Tree()
+		if treeErr != nil {
+			return fmt.Errorf("failed to read tree for commit %s: %w", c.Hash.String()[:7], treeErr)
+		}
+		if len(tree.Entries) > 0 {
+			dataCommits = append(dataCommits, c)
+		}
+	}
+
+	if len(dataCommits) == 0 {
+		ref := plumbing.NewHashReference(refName, remoteHash)
+		if setErr := repo.Storer.SetReference(ref); setErr != nil {
+			return fmt.Errorf("failed to reset v2 /main to remote: %w", setErr)
+		}
+		fmt.Fprintln(w, "[entire] Done — local had no checkpoint data, reset to remote")
+		return nil
+	}
+
+	fmt.Fprintf(w, "[entire] Cherry-picking %d local checkpoint(s) onto remote...\n", len(dataCommits))
+
+	newTip, err := cherryPickOnto(ctx, repo, remoteHash, dataCommits)
+	if err != nil {
+		return fmt.Errorf("failed to cherry-pick local commits onto remote: %w", err)
+	}
+
+	ref := plumbing.NewHashReference(refName, newTip)
+	if setErr := repo.Storer.SetReference(ref); setErr != nil {
+		return fmt.Errorf("failed to update v2 /main ref: %w", setErr)
+	}
+
+	fmt.Fprintln(w, "[entire] Done — all local and remote checkpoints preserved")
+	return nil
+}
+
 // lsRemoteRef runs git ls-remote and returns the hash for a specific ref.
 // Returns plumbing.ZeroHash if the ref doesn't exist on the remote.
 func lsRemoteRef(ctx context.Context, repoPath, remote, refName string) (plumbing.Hash, error) {

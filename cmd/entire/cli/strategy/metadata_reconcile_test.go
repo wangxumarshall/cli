@@ -955,3 +955,71 @@ func TestIsV2MainDisconnected_SharedAncestry(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, disconnected, "diverged with shared ancestor should not be disconnected")
 }
+
+func TestReconcileDisconnectedV2Ref_CherryPicksOntoRemote(t *testing.T) {
+	t.Parallel()
+
+	bareDir := initBareWithV2MainRef(t)
+	cloneDir, _ := cloneWithConfig(t, bareDir)
+
+	// Create disconnected local v2 /main with different checkpoint data
+	repo, err := git.PlainOpen(cloneDir)
+	require.NoError(t, err)
+
+	localEntries := map[string]object.TreeEntry{
+		"cd/ef01234567/" + paths.MetadataFileName: {
+			Name: paths.MetadataFileName,
+			Mode: 0o100644,
+			Hash: createTestBlob(t, repo, `{"checkpoint_id":"cdef01234567"}`),
+		},
+	}
+	localTreeHash, err := checkpoint.BuildTreeFromEntries(context.Background(), repo, localEntries)
+	require.NoError(t, err)
+	localCommitHash, err := checkpoint.CreateCommit(repo, localTreeHash, plumbing.ZeroHash, "local checkpoint", "test", "test@test.com")
+	require.NoError(t, err)
+	require.NoError(t, repo.Storer.SetReference(plumbing.NewHashReference(plumbing.ReferenceName(paths.V2MainRefName), localCommitHash)))
+
+	// Verify disconnected
+	disconnected, err := IsV2MainDisconnected(context.Background(), repo, bareDir)
+	require.NoError(t, err)
+	require.True(t, disconnected, "setup: should be disconnected")
+
+	// Reconcile
+	var buf strings.Builder
+	err = ReconcileDisconnectedV2Ref(context.Background(), repo, bareDir, &buf)
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Cherry-picking")
+	assert.Contains(t, buf.String(), "Done")
+
+	// After reconciliation, should no longer be disconnected
+	disconnected, err = IsV2MainDisconnected(context.Background(), repo, bareDir)
+	require.NoError(t, err)
+	assert.False(t, disconnected, "should be connected after reconciliation")
+
+	// Verify both remote and local checkpoint data exist in the tree
+	ref, err := repo.Reference(plumbing.ReferenceName(paths.V2MainRefName), true)
+	require.NoError(t, err)
+	tipCommit, err := repo.CommitObject(ref.Hash())
+	require.NoError(t, err)
+	tree, err := tipCommit.Tree()
+	require.NoError(t, err)
+	entries := make(map[string]object.TreeEntry)
+	require.NoError(t, checkpoint.FlattenTree(repo, tree, "", entries))
+
+	assert.Contains(t, entries, "ab/cdef012345/"+paths.MetadataFileName, "remote checkpoint should be preserved")
+	assert.Contains(t, entries, "cd/ef01234567/"+paths.MetadataFileName, "local checkpoint should be preserved")
+}
+
+func TestReconcileDisconnectedV2Ref_NoLocalRef(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	_, err := git.PlainInit(dir, false)
+	require.NoError(t, err)
+	repo, err := git.PlainOpen(dir)
+	require.NoError(t, err)
+
+	var buf strings.Builder
+	err = ReconcileDisconnectedV2Ref(context.Background(), repo, dir, &buf)
+	require.NoError(t, err)
+	assert.Empty(t, buf.String())
+}

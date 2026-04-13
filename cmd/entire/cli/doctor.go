@@ -363,6 +363,65 @@ func checkDisconnectedMetadata(cmd *cobra.Command, force bool) error {
 	return nil
 }
 
+// checkDisconnectedV2Main detects and optionally repairs disconnected
+// local/remote v2 /main refs.
+func checkDisconnectedV2Main(cmd *cobra.Command, force bool) error {
+	repo, err := openRepository(cmd.Context())
+	if err != nil {
+		return fmt.Errorf("failed to open repository: %w", err)
+	}
+
+	ctx := cmd.Context()
+	remote := strategy.ResolveCheckpointURL(ctx, "origin")
+	if remote == "" {
+		remote = "origin"
+	}
+
+	disconnected, err := strategy.IsV2MainDisconnected(ctx, repo, remote)
+	if err != nil {
+		return fmt.Errorf("could not check v2 /main ref state: %w", err)
+	}
+
+	w := cmd.OutOrStdout()
+
+	if !disconnected {
+		fmt.Fprintln(w, "✓ v2 /main ref: OK")
+		return nil
+	}
+
+	fmt.Fprintln(w, "v2 /main ref: DISCONNECTED")
+	fmt.Fprintln(w, "  Local and remote v2 /main refs share no common ancestor.")
+	fmt.Fprintln(w, "  Fix: cherry-pick local checkpoints onto remote tip (preserves all data).")
+
+	if !force {
+		var confirmed bool
+		form := NewAccessibleForm(
+			huh.NewGroup(
+				huh.NewConfirm().
+					Title("Fix disconnected v2 /main ref?").
+					Value(&confirmed),
+			),
+		)
+		if formErr := form.Run(); formErr != nil {
+			if errors.Is(formErr, huh.ErrUserAborted) {
+				return nil
+			}
+			return fmt.Errorf("prompt failed: %w", formErr)
+		}
+		if !confirmed {
+			fmt.Fprintln(w, "  -> Skipped")
+			return nil
+		}
+	}
+
+	if fixErr := strategy.ReconcileDisconnectedV2Ref(ctx, repo, remote, cmd.ErrOrStderr()); fixErr != nil {
+		return fmt.Errorf("failed to reconcile v2 /main ref: %w", fixErr)
+	}
+
+	fmt.Fprintln(w, "  ✓ Fixed: v2 /main ref reconciled")
+	return nil
+}
+
 // checkV2GenerationHealth verifies that archived /full/* generations are well-formed.
 // Checks: generation.json exists and is valid, timestamps are sane, generation has checkpoints,
 // and generation sequence numbers are contiguous.
