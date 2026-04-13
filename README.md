@@ -462,6 +462,19 @@ mise trust
 mise run build
 ```
 
+### Dev Container
+
+The repo includes a `.devcontainer/` configuration that installs the system packages used by local development and CI (`git`, `tmux`, `gnome-keyring`, etc) and then bootstraps the repo's `mise` toolchain.
+
+Open the folder in a Dev Container, or start it from the `devcontainer` CLI as follows:
+
+```bash
+devcontainer up --workspace-folder .
+devcontainer exec --workspace-folder . bash -lc '.devcontainer/run-with-keyring.sh'
+```
+
+The container's `postCreateCommand` runs `mise trust --yes && mise install`, so Go, `golangci-lint`, `gotestsum`, `shellcheck`, and the canary E2E helper binaries are ready after creation. Use `.devcontainer/run-with-keyring.sh <command>` for commands that touch the Linux keyring, including `mise run test:ci`.
+
 ### Common Tasks
 
 ```
