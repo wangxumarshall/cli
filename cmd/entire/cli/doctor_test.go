@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -790,4 +792,64 @@ func TestRunSessionsFix_ForceDiscardOutput_Indented(t *testing.T) {
 			assert.True(t, strings.HasPrefix(line, "  ✓ "), "expected nested success line to stay indented: %q", line)
 		}
 	}
+}
+
+func TestRunSessionsFix_V2ChecksSkippedWhenDisabled(t *testing.T) {
+	// Cannot use t.Parallel() because t.Chdir modifies process-global state.
+	dir := setupGitRepoForPhaseTest(t)
+	t.Chdir(dir)
+
+	// Create v2 refs but do NOT enable checkpoints_v2 in settings.
+	// Intentionally only create /main (not /full/current) to trigger INCONSISTENT
+	// if the check were to run.
+	repo, err := git.PlainOpen(dir)
+	require.NoError(t, err)
+	createV2Ref(t, repo, paths.V2MainRefName)
+
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+
+	err = runSessionsFix(cmd, true)
+	require.NoError(t, err)
+
+	output := stdout.String()
+	// v2 checks should not appear in output
+	assert.NotContains(t, output, "v2 refs")
+	assert.NotContains(t, output, "v2 checkpoint counts")
+	assert.NotContains(t, output, "v2 generations")
+	assert.NotContains(t, output, "v2 /main ref")
+}
+
+func TestRunSessionsFix_V2ChecksRunWhenEnabled(t *testing.T) {
+	// Cannot use t.Parallel() because t.Chdir modifies process-global state.
+	dir := setupGitRepoForPhaseTest(t)
+	t.Chdir(dir)
+
+	// Create settings.json with checkpoints_v2 enabled
+	entireDir := filepath.Join(dir, ".entire")
+	require.NoError(t, os.MkdirAll(entireDir, 0o755))
+	settingsJSON := `{"enabled": true, "strategy_options": {"checkpoints_v2": true}}`
+	require.NoError(t, os.WriteFile(filepath.Join(entireDir, "settings.json"), []byte(settingsJSON), 0o644))
+
+	// Create both v2 refs so ref existence check passes
+	repo, err := git.PlainOpen(dir)
+	require.NoError(t, err)
+	createV2Ref(t, repo, paths.V2MainRefName)
+	createV2Ref(t, repo, paths.V2FullCurrentRefName)
+
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+
+	_ = runSessionsFix(cmd, true)
+	// May get an error from the disconnected check (no remote), that's OK
+
+	output := stdout.String()
+	// v2 checks should appear in output
+	assert.Contains(t, output, "v2 refs: OK")
 }

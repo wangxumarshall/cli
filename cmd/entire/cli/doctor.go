@@ -12,6 +12,7 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 	"github.com/entireio/cli/cmd/entire/cli/session"
+	"github.com/entireio/cli/cmd/entire/cli/settings"
 	"github.com/entireio/cli/cmd/entire/cli/strategy"
 
 	"github.com/go-git/go-git/v6"
@@ -31,14 +32,21 @@ Checks performed:
   1. Disconnected metadata branches: detects when local and remote
      entire/checkpoints/v1 branches share no common ancestor (caused by a
      previous bug). Fixes by cherry-picking local checkpoints onto remote tip.
-  2. Stuck sessions: sessions stuck in ACTIVE or ENDED phase that need cleanup.
+
+  When checkpoints_v2 is enabled:
+  2. Disconnected v2 /main ref: same detection for v2 refs under refs/entire/.
+  3. v2 ref existence: verifies /main and /full/current refs exist consistently.
+  4. v2 checkpoint counts: verifies /main and /full/current checkpoint counts are consistent.
+  5. v2 generation health: checks archived generations for valid metadata.
+
+  6. Stuck sessions: sessions stuck in ACTIVE or ENDED phase that need cleanup.
 
 A session is considered stuck if:
   - It is in ACTIVE phase with no interaction for over 1 hour
   - It is in ENDED phase with uncondensed checkpoint data on a shadow branch
 
 For each stuck session, you can choose to:
-  - Condense: Save session data to permanent storage (entire/checkpoints/v1 branch)
+  - Condense: Save session data to permanent storage
   - Discard: Remove the session state and shadow branch data
   - Skip: Leave the session as-is
 
@@ -78,8 +86,48 @@ func runSessionsFix(cmd *cobra.Command, force bool) error {
 	}
 	fmt.Fprintln(cmd.OutOrStdout())
 
-	// Check 2: Stuck sessions
+	// v2 checks (only when checkpoints_v2 is enabled)
 	ctx := cmd.Context()
+	if settings.IsCheckpointsV2Enabled(ctx) {
+		// Check 2: Disconnected v2 /main ref
+		v2DisconnectedErr := checkDisconnectedV2Main(cmd, force)
+		if v2DisconnectedErr != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Error: v2 /main check failed: %v\n", v2DisconnectedErr)
+			if finalErr == nil {
+				finalErr = NewSilentError(fmt.Errorf("v2 /main check failed: %w", v2DisconnectedErr))
+			}
+		}
+
+		if repo, repoErr := openRepository(ctx); repoErr == nil {
+			// Check 3: v2 ref existence
+			if refErr := checkV2RefExistence(cmd, repo); refErr != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Error: v2 ref existence check failed: %v\n", refErr)
+				if finalErr == nil {
+					finalErr = NewSilentError(fmt.Errorf("v2 ref check failed: %w", refErr))
+				}
+			}
+
+			// Check 4: v2 checkpoint count consistency
+			if countErr := checkV2CheckpointCounts(cmd, repo); countErr != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Error: v2 checkpoint count check failed: %v\n", countErr)
+				if finalErr == nil {
+					finalErr = NewSilentError(fmt.Errorf("v2 count check failed: %w", countErr))
+				}
+			}
+
+			// Check 5: v2 generation health
+			if genErr := checkV2GenerationHealth(cmd, repo); genErr != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Error: v2 generation health check failed: %v\n", genErr)
+				if finalErr == nil {
+					finalErr = NewSilentError(fmt.Errorf("v2 generation check failed: %w", genErr))
+				}
+			}
+		}
+
+		fmt.Fprintln(cmd.OutOrStdout())
+	}
+
+	// Stuck sessions
 	// Load all session states
 	states, err := strategy.ListSessionStates(ctx)
 	if err != nil {
