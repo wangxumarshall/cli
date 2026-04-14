@@ -27,7 +27,7 @@ func TestReadGeneration_EmptyTree_ReturnsDefault(t *testing.T) {
 	emptyTree, err := BuildTreeFromEntries(context.Background(), repo, map[string]object.TreeEntry{})
 	require.NoError(t, err)
 
-	gen, err := store.readGeneration(emptyTree)
+	gen, err := store.ReadGeneration(emptyTree)
 	require.NoError(t, err)
 
 	assert.True(t, gen.OldestCheckpointAt.IsZero())
@@ -53,7 +53,7 @@ func TestReadGeneration_ParsesJSON(t *testing.T) {
 	require.NoError(t, err)
 
 	// Read it back
-	gen, err := store.readGeneration(treeHash)
+	gen, err := store.ReadGeneration(treeHash)
 	require.NoError(t, err)
 
 	assert.True(t, gen.OldestCheckpointAt.Equal(now.Add(-1*time.Hour)))
@@ -82,7 +82,7 @@ func TestWriteGeneration_RoundTrips(t *testing.T) {
 	treeHash, err := BuildTreeFromEntries(context.Background(), repo, entries)
 	require.NoError(t, err)
 
-	gen, err := store.readGeneration(treeHash)
+	gen, err := store.ReadGeneration(treeHash)
 	require.NoError(t, err)
 
 	assert.True(t, gen.OldestCheckpointAt.Equal(now))
@@ -146,7 +146,7 @@ func TestAddGenerationJSONToTree(t *testing.T) {
 	assert.NotEqual(t, rootTreeHash, newRootHash)
 
 	// Verify generation.json is present and shard dir is preserved
-	readGen, err := store.readGeneration(newRootHash)
+	readGen, err := store.ReadGeneration(newRootHash)
 	require.NoError(t, err)
 	assert.False(t, readGen.OldestCheckpointAt.IsZero())
 
@@ -405,7 +405,7 @@ func TestRotateGeneration_ArchivesCurrentAndCreatesNewOrphan(t *testing.T) {
 	// Archived ref should contain generation.json with timestamps
 	archiveCommit, err := repo.CommitObject(archiveRef.Hash())
 	require.NoError(t, err)
-	archiveGen, err := store.readGeneration(archiveCommit.TreeHash)
+	archiveGen, err := store.ReadGeneration(archiveCommit.TreeHash)
 	require.NoError(t, err)
 	assert.False(t, archiveGen.OldestCheckpointAt.IsZero(), "archived generation should have oldest timestamp")
 	assert.False(t, archiveGen.NewestCheckpointAt.IsZero(), "archived generation should have newest timestamp")
@@ -502,7 +502,7 @@ func TestReadGeneration_BackwardCompatible(t *testing.T) {
 	require.NoError(t, err)
 
 	// Should parse without error, ignoring the unknown checkpoints field
-	gen, err := store.readGeneration(treeHash)
+	gen, err := store.ReadGeneration(treeHash)
 	require.NoError(t, err)
 
 	expected := time.Date(2026, 3, 25, 12, 0, 0, 0, time.UTC)

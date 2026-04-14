@@ -499,7 +499,7 @@ func checkV2GenerationHealth(cmd *cobra.Command, repo *git.Repository) error {
 			continue
 		}
 
-		gen, genErr := v2Store.ReadGenerationFromRef(refName)
+		gen, genErr := v2Store.ReadGeneration(treeHash)
 		if genErr != nil {
 			warnings = append(warnings, fmt.Sprintf("generation %s: failed to read generation.json: %v", genName, genErr))
 			continue
@@ -587,7 +587,7 @@ func checkV2CheckpointCounts(cmd *cobra.Command, repo *git.Repository) error {
 
 // checkV2RefExistence verifies that v2 refs exist (or both are absent for a fresh repo).
 // One ref without the other suggests a partial initialization.
-func checkV2RefExistence(cmd *cobra.Command, repo *git.Repository) error { //nolint:unparam // error return kept for consistency with other check functions
+func checkV2RefExistence(cmd *cobra.Command, repo *git.Repository) error {
 	w := cmd.OutOrStdout()
 
 	mainRefName := plumbing.ReferenceName(paths.V2MainRefName)
@@ -606,8 +606,10 @@ func checkV2RefExistence(cmd *cobra.Command, repo *git.Repository) error { //nol
 		fmt.Fprintln(w, "✓ v2 refs: OK (no checkpoints written yet)")
 	case hasMain && !hasFull:
 		fmt.Fprintln(w, "v2 refs: INCONSISTENT — /main exists but /full/current is missing")
+		return errors.New("v2 refs inconsistent: /main exists but /full/current is missing")
 	case !hasMain && hasFull:
 		fmt.Fprintln(w, "v2 refs: INCONSISTENT — /full/current exists but /main is missing")
+		return errors.New("v2 refs inconsistent: /full/current exists but /main is missing")
 	}
 
 	return nil

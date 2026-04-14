@@ -30,21 +30,10 @@ import (
 func createV2Ref(t *testing.T, repo *git.Repository, refName string) {
 	t.Helper()
 
-	emptyTree := &object.Tree{Entries: []object.TreeEntry{}}
-	treeObj := repo.Storer.NewEncodedObject()
-	require.NoError(t, emptyTree.Encode(treeObj))
-	treeHash, err := repo.Storer.SetEncodedObject(treeObj)
+	treeHash, err := checkpoint.BuildTreeFromEntries(context.Background(), repo, make(map[string]object.TreeEntry))
 	require.NoError(t, err)
 
-	commitObj := &object.Commit{
-		Author:    object.Signature{Name: "test", Email: "test@test.com", When: time.Now()},
-		Committer: object.Signature{Name: "test", Email: "test@test.com", When: time.Now()},
-		Message:   "init v2 ref",
-		TreeHash:  treeHash,
-	}
-	enc := repo.Storer.NewEncodedObject()
-	require.NoError(t, commitObj.Encode(enc))
-	commitHash, err := repo.Storer.SetEncodedObject(enc)
+	commitHash, err := checkpoint.CreateCommit(repo, treeHash, plumbing.ZeroHash, "init v2 ref", "test", "test@test.com")
 	require.NoError(t, err)
 
 	ref := plumbing.NewHashReference(plumbing.ReferenceName(refName), commitHash)
@@ -86,19 +75,22 @@ func createV2RefWithCheckpoints(t *testing.T, repo *git.Repository, refName stri
 	treeHash, err := checkpoint.BuildTreeFromEntries(context.Background(), repo, entries)
 	require.NoError(t, err)
 
-	commitObj := &object.Commit{
-		Author:    object.Signature{Name: "test", Email: "test@test.com", When: time.Now()},
-		Committer: object.Signature{Name: "test", Email: "test@test.com", When: time.Now()},
-		Message:   "v2 ref with checkpoints",
-		TreeHash:  treeHash,
-	}
-	enc := repo.Storer.NewEncodedObject()
-	require.NoError(t, commitObj.Encode(enc))
-	commitHash, err := repo.Storer.SetEncodedObject(enc)
+	commitHash, err := checkpoint.CreateCommit(repo, treeHash, plumbing.ZeroHash, "v2 ref with checkpoints", "test", "test@test.com")
 	require.NoError(t, err)
 
 	ref := plumbing.NewHashReference(plumbing.ReferenceName(refName), commitHash)
 	require.NoError(t, repo.Storer.SetReference(ref))
+}
+
+// newTestCmd creates a minimal cobra.Command with captured stdout/stderr for testing.
+func newTestCmd(t *testing.T) (*cobra.Command, *bytes.Buffer, *bytes.Buffer) {
+	t.Helper()
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	return cmd, &stdout, &stderr
 }
 
 // testBaseCommit is a fake commit hash used across classifySession tests.
@@ -382,11 +374,7 @@ func TestCheckV2RefExistence_BothExist(t *testing.T) {
 	createV2Ref(t, repo, paths.V2MainRefName)
 	createV2Ref(t, repo, paths.V2FullCurrentRefName)
 
-	cmd := &cobra.Command{}
-	cmd.SetContext(context.Background())
-	var stdout, stderr bytes.Buffer
-	cmd.SetOut(&stdout)
-	cmd.SetErr(&stderr)
+	cmd, stdout, stderr := newTestCmd(t)
 
 	err = checkV2RefExistence(cmd, repo)
 	require.NoError(t, err)
@@ -400,11 +388,7 @@ func TestCheckV2RefExistence_NeitherExist(t *testing.T) {
 	repo, err := git.PlainOpen(dir)
 	require.NoError(t, err)
 
-	cmd := &cobra.Command{}
-	cmd.SetContext(context.Background())
-	var stdout, stderr bytes.Buffer
-	cmd.SetOut(&stdout)
-	cmd.SetErr(&stderr)
+	cmd, stdout, _ := newTestCmd(t)
 
 	err = checkV2RefExistence(cmd, repo)
 	require.NoError(t, err)
@@ -419,14 +403,10 @@ func TestCheckV2RefExistence_OnlyMainExists(t *testing.T) {
 
 	createV2Ref(t, repo, paths.V2MainRefName)
 
-	cmd := &cobra.Command{}
-	cmd.SetContext(context.Background())
-	var stdout, stderr bytes.Buffer
-	cmd.SetOut(&stdout)
-	cmd.SetErr(&stderr)
+	cmd, stdout, _ := newTestCmd(t)
 
 	err = checkV2RefExistence(cmd, repo)
-	require.NoError(t, err)
+	require.Error(t, err)
 	assert.Contains(t, stdout.String(), "INCONSISTENT")
 	assert.Contains(t, stdout.String(), "/full/current is missing")
 }
@@ -439,14 +419,10 @@ func TestCheckV2RefExistence_OnlyFullCurrentExists(t *testing.T) {
 
 	createV2Ref(t, repo, paths.V2FullCurrentRefName)
 
-	cmd := &cobra.Command{}
-	cmd.SetContext(context.Background())
-	var stdout, stderr bytes.Buffer
-	cmd.SetOut(&stdout)
-	cmd.SetErr(&stderr)
+	cmd, stdout, _ := newTestCmd(t)
 
 	err = checkV2RefExistence(cmd, repo)
-	require.NoError(t, err)
+	require.Error(t, err)
 	assert.Contains(t, stdout.String(), "INCONSISTENT")
 	assert.Contains(t, stdout.String(), "/main is missing")
 }
@@ -460,11 +436,7 @@ func TestCheckV2CheckpointCounts_Consistent(t *testing.T) {
 	createV2RefWithCheckpoints(t, repo, paths.V2MainRefName, 10)
 	createV2RefWithCheckpoints(t, repo, paths.V2FullCurrentRefName, 5)
 
-	cmd := &cobra.Command{}
-	cmd.SetContext(context.Background())
-	var stdout, stderr bytes.Buffer
-	cmd.SetOut(&stdout)
-	cmd.SetErr(&stderr)
+	cmd, stdout, _ := newTestCmd(t)
 
 	err = checkV2CheckpointCounts(cmd, repo)
 	require.NoError(t, err)
@@ -482,11 +454,7 @@ func TestCheckV2CheckpointCounts_FullExceedsMain(t *testing.T) {
 	createV2RefWithCheckpoints(t, repo, paths.V2MainRefName, 3)
 	createV2RefWithCheckpoints(t, repo, paths.V2FullCurrentRefName, 5)
 
-	cmd := &cobra.Command{}
-	cmd.SetContext(context.Background())
-	var stdout, stderr bytes.Buffer
-	cmd.SetOut(&stdout)
-	cmd.SetErr(&stderr)
+	cmd, stdout, _ := newTestCmd(t)
 
 	err = checkV2CheckpointCounts(cmd, repo)
 	require.NoError(t, err)
@@ -499,11 +467,7 @@ func TestCheckV2CheckpointCounts_SkipsWhenRefsMissing(t *testing.T) {
 	repo, err := git.PlainOpen(dir)
 	require.NoError(t, err)
 
-	cmd := &cobra.Command{}
-	cmd.SetContext(context.Background())
-	var stdout, stderr bytes.Buffer
-	cmd.SetOut(&stdout)
-	cmd.SetErr(&stderr)
+	cmd, stdout, _ := newTestCmd(t)
 
 	err = checkV2CheckpointCounts(cmd, repo)
 	require.NoError(t, err)
@@ -542,15 +506,7 @@ func createArchivedGeneration(t *testing.T, repo *git.Repository, generationNum 
 	treeHash, err := checkpoint.BuildTreeFromEntries(context.Background(), repo, entries)
 	require.NoError(t, err)
 
-	commitObj := &object.Commit{
-		Author:    object.Signature{Name: "test", Email: "test@test.com", When: time.Now()},
-		Committer: object.Signature{Name: "test", Email: "test@test.com", When: time.Now()},
-		Message:   "archived generation",
-		TreeHash:  treeHash,
-	}
-	enc := repo.Storer.NewEncodedObject()
-	require.NoError(t, commitObj.Encode(enc))
-	commitHash, err := repo.Storer.SetEncodedObject(enc)
+	commitHash, err := checkpoint.CreateCommit(repo, treeHash, plumbing.ZeroHash, "archived generation", "test", "test@test.com")
 	require.NoError(t, err)
 
 	refName := fmt.Sprintf("%s%013d", paths.V2FullRefPrefix, generationNum)
@@ -564,11 +520,7 @@ func TestCheckV2GenerationHealth_NoArchives(t *testing.T) {
 	repo, err := git.PlainOpen(dir)
 	require.NoError(t, err)
 
-	cmd := &cobra.Command{}
-	cmd.SetContext(context.Background())
-	var stdout bytes.Buffer
-	cmd.SetOut(&stdout)
-	cmd.SetErr(&bytes.Buffer{})
+	cmd, stdout, _ := newTestCmd(t)
 
 	err = checkV2GenerationHealth(cmd, repo)
 	require.NoError(t, err)
@@ -588,11 +540,7 @@ func TestCheckV2GenerationHealth_HealthyGeneration(t *testing.T) {
 	}
 	createArchivedGeneration(t, repo, 1, gen, 5)
 
-	cmd := &cobra.Command{}
-	cmd.SetContext(context.Background())
-	var stdout bytes.Buffer
-	cmd.SetOut(&stdout)
-	cmd.SetErr(&bytes.Buffer{})
+	cmd, stdout, _ := newTestCmd(t)
 
 	err = checkV2GenerationHealth(cmd, repo)
 	require.NoError(t, err)
@@ -607,11 +555,7 @@ func TestCheckV2GenerationHealth_MissingGenerationJSON(t *testing.T) {
 
 	createArchivedGeneration(t, repo, 1, nil, 5)
 
-	cmd := &cobra.Command{}
-	cmd.SetContext(context.Background())
-	var stdout bytes.Buffer
-	cmd.SetOut(&stdout)
-	cmd.SetErr(&bytes.Buffer{})
+	cmd, stdout, _ := newTestCmd(t)
 
 	err = checkV2GenerationHealth(cmd, repo)
 	require.NoError(t, err)
@@ -632,11 +576,7 @@ func TestCheckV2GenerationHealth_InvalidTimestamps(t *testing.T) {
 	}
 	createArchivedGeneration(t, repo, 1, gen, 5)
 
-	cmd := &cobra.Command{}
-	cmd.SetContext(context.Background())
-	var stdout bytes.Buffer
-	cmd.SetOut(&stdout)
-	cmd.SetErr(&bytes.Buffer{})
+	cmd, stdout, _ := newTestCmd(t)
 
 	err = checkV2GenerationHealth(cmd, repo)
 	require.NoError(t, err)
@@ -657,11 +597,7 @@ func TestCheckV2GenerationHealth_EmptyGeneration(t *testing.T) {
 	}
 	createArchivedGeneration(t, repo, 1, gen, 0)
 
-	cmd := &cobra.Command{}
-	cmd.SetContext(context.Background())
-	var stdout bytes.Buffer
-	cmd.SetOut(&stdout)
-	cmd.SetErr(&bytes.Buffer{})
+	cmd, stdout, _ := newTestCmd(t)
 
 	err = checkV2GenerationHealth(cmd, repo)
 	require.NoError(t, err)
@@ -688,11 +624,7 @@ func TestCheckV2GenerationHealth_SequenceGap(t *testing.T) {
 	}
 	createArchivedGeneration(t, repo, 3, gen3, 3)
 
-	cmd := &cobra.Command{}
-	cmd.SetContext(context.Background())
-	var stdout bytes.Buffer
-	cmd.SetOut(&stdout)
-	cmd.SetErr(&bytes.Buffer{})
+	cmd, stdout, _ := newTestCmd(t)
 
 	err = checkV2GenerationHealth(cmd, repo)
 	require.NoError(t, err)
@@ -806,11 +738,7 @@ func TestRunSessionsFix_V2ChecksSkippedWhenDisabled(t *testing.T) {
 	require.NoError(t, err)
 	createV2Ref(t, repo, paths.V2MainRefName)
 
-	cmd := &cobra.Command{}
-	cmd.SetContext(context.Background())
-	var stdout, stderr bytes.Buffer
-	cmd.SetOut(&stdout)
-	cmd.SetErr(&stderr)
+	cmd, stdout, _ := newTestCmd(t)
 
 	err = runSessionsFix(cmd, true)
 	require.NoError(t, err)
@@ -840,11 +768,7 @@ func TestRunSessionsFix_V2ChecksRunWhenEnabled(t *testing.T) {
 	createV2Ref(t, repo, paths.V2MainRefName)
 	createV2Ref(t, repo, paths.V2FullCurrentRefName)
 
-	cmd := &cobra.Command{}
-	cmd.SetContext(context.Background())
-	var stdout, stderr bytes.Buffer
-	cmd.SetOut(&stdout)
-	cmd.SetErr(&stderr)
+	cmd, stdout, _ := newTestCmd(t)
 
 	// May get an error from the disconnected check (no remote), that's OK
 	_ = runSessionsFix(cmd, true) //nolint:errcheck // error from missing remote is expected
