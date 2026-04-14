@@ -98,7 +98,13 @@ func runSessionsFix(cmd *cobra.Command, force bool) error {
 			}
 		}
 
-		if repo, repoErr := openRepository(ctx); repoErr == nil {
+		repo, repoErr := openRepository(ctx)
+		if repoErr != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Error: could not open repository for v2 checks: %v\n", repoErr)
+			if finalErr == nil {
+				finalErr = NewSilentError(fmt.Errorf("v2 checks failed: %w", repoErr))
+			}
+		} else {
 			// Check 3: v2 ref existence
 			if refErr := checkV2RefExistence(cmd, repo); refErr != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Error: v2 ref existence check failed: %v\n", refErr)
