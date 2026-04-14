@@ -234,13 +234,23 @@ func IsV2MainDisconnected(ctx context.Context, repo *git.Repository, remote stri
 		return false, nil
 	}
 
-	// Fetch remote ref to temporary local ref for merge-base check
+	// Fetch remote ref to temporary local ref for merge-base check.
+	// Use the fetched hash (not ls-remote hash) since the remote may have advanced.
 	if fetchErr := fetchRefToTemp(ctx, repoPath, remote, paths.V2MainRefName, v2DoctorTmpRef); fetchErr != nil {
 		return false, fmt.Errorf("failed to fetch remote v2 /main: %w", fetchErr)
 	}
 	defer cleanupTmpRef(repo)
 
-	return isDisconnected(ctx, repoPath, localRef.Hash().String(), remoteHash.String())
+	fetchedHash, err := resolveRefHash(repo, v2DoctorTmpRef)
+	if err != nil {
+		return false, fmt.Errorf("failed to read fetched v2 /main ref: %w", err)
+	}
+
+	if localRef.Hash() == fetchedHash {
+		return false, nil
+	}
+
+	return isDisconnected(ctx, repoPath, localRef.Hash().String(), fetchedHash.String())
 }
 
 // ReconcileDisconnectedV2Ref detects and repairs disconnected local/remote
@@ -286,7 +296,17 @@ func ReconcileDisconnectedV2Ref(
 	}
 	defer cleanupTmpRef(repo)
 
-	disconnected, err := isDisconnected(ctx, repoPath, localRef.Hash().String(), remoteHash.String())
+	// Use the fetched hash (not ls-remote hash) since the remote may have advanced.
+	fetchedHash, err := resolveRefHash(repo, v2DoctorTmpRef)
+	if err != nil {
+		return fmt.Errorf("failed to read fetched v2 /main ref: %w", err)
+	}
+
+	if localRef.Hash() == fetchedHash {
+		return nil
+	}
+
+	disconnected, err := isDisconnected(ctx, repoPath, localRef.Hash().String(), fetchedHash.String())
 	if err != nil {
 		return fmt.Errorf("failed to check v2 /main ancestry: %w", err)
 	}
@@ -313,7 +333,7 @@ func ReconcileDisconnectedV2Ref(
 	}
 
 	if len(dataCommits) == 0 {
-		ref := plumbing.NewHashReference(refName, remoteHash)
+		ref := plumbing.NewHashReference(refName, fetchedHash)
 		if setErr := repo.Storer.SetReference(ref); setErr != nil {
 			return fmt.Errorf("failed to reset v2 /main to remote: %w", setErr)
 		}
@@ -323,7 +343,7 @@ func ReconcileDisconnectedV2Ref(
 
 	fmt.Fprintf(w, "[entire] Cherry-picking %d local checkpoint(s) onto remote...\n", len(dataCommits))
 
-	newTip, err := cherryPickOnto(ctx, repo, remoteHash, dataCommits)
+	newTip, err := cherryPickOnto(ctx, repo, fetchedHash, dataCommits)
 	if err != nil {
 		return fmt.Errorf("failed to cherry-pick local commits onto remote: %w", err)
 	}
@@ -400,6 +420,15 @@ func fetchRefToTemp(ctx context.Context, repoPath, remote, srcRef, dstRef string
 		return fmt.Errorf("git fetch %s failed: %w", redactedURL, err)
 	}
 	return nil
+}
+
+// resolveRefHash reads the commit hash that a ref points to.
+func resolveRefHash(repo *git.Repository, refName string) (plumbing.Hash, error) {
+	ref, err := repo.Reference(plumbing.ReferenceName(refName), true)
+	if err != nil {
+		return plumbing.ZeroHash, fmt.Errorf("ref %s not found: %w", refName, err)
+	}
+	return ref.Hash(), nil
 }
 
 // cleanupTmpRef deletes the temporary ref used by doctor checks.
