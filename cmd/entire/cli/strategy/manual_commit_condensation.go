@@ -390,7 +390,7 @@ func (s *ManualCommitStrategy) extractOrCreateSessionData(ctx context.Context, r
 		// This happens for sessions where the agent never set TranscriptPath
 		// (e.g., Codex hooks may send null transcript_path). The skip gate in
 		// CondenseSession will skip condensation if nothing is found.
-		logging.Warn(logging.WithComponent(ctx, "checkpoint"),
+		logging.Debug(logging.WithComponent(ctx, "checkpoint"),
 			"no shadow branch and no transcript path, returning empty session data",
 			slog.String("session_id", state.SessionID),
 			slog.String("agent_type", string(state.AgentType)),
