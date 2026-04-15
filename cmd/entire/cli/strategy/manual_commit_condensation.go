@@ -447,18 +447,8 @@ func resolveTranscriptFromAgentStorage(ctx context.Context, ag agent.Agent, stat
 	}
 
 	// Some agents (e.g., OpenCode) require an export command to produce the
-	// transcript file on disk. Call PrepareTranscript if the agent supports it.
-	if preparer, ok := agent.AsTranscriptPreparer(ag); ok {
-		if prepErr := preparer.PrepareTranscript(ctx, resolved); prepErr != nil {
-			logging.Debug(logCtx, "transcript fallback: PrepareTranscript failed",
-				slog.String("session_id", state.SessionID),
-				slog.String("agent_type", string(state.AgentType)),
-				slog.String("resolved_path", resolved),
-				slog.String("error", prepErr.Error()),
-			)
-			// Continue — the file may already exist from a previous export
-		}
-	}
+	// transcript file on disk. Reuses the existing best-effort helper.
+	prepareTranscriptIfNeeded(ctx, ag, resolved)
 
 	data, readErr := os.ReadFile(resolved) //nolint:gosec // path resolved by agent
 	if readErr != nil || len(data) == 0 {
