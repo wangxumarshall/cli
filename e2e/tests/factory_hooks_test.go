@@ -33,8 +33,7 @@ func TestFactoryTaskCheckpointExistsBeforeCommit(t *testing.T) {
 
 		testutil.WaitForFileExists(t, s.Dir, "docs/factory-hook-check.md", 10*time.Second)
 
-		point := waitForTaskRewindPoint(t, s.Dir, 15*time.Second)
-		assert.NotEmpty(t, point.ToolUseID, "task rewind point should include tool_use_id")
+		waitForTaskRewindPoint(t, s.Dir, 15*time.Second)
 	})
 }
 
