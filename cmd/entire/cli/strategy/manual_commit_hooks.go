@@ -1937,10 +1937,13 @@ func (s *ManualCommitStrategy) tryAgentCommitFastPath(ctx context.Context, commi
 		return false
 	}
 	logCtx := logging.WithComponent(ctx, "checkpoint")
+	activeSessions := 0
+	emptyActiveSessions := 0
 	for _, state := range sessions {
 		if !state.Phase.IsActive() {
 			continue
 		}
+		activeSessions++
 		// Skip sessions that have no condensable content: no transcript path,
 		// no tracked files, and no shadow branch data (StepCount == 0). These
 		// would produce a Skipped result in CondenseSession, leaving the
@@ -1948,6 +1951,7 @@ func (s *ManualCommitStrategy) tryAgentCommitFastPath(ctx context.Context, commi
 		// NOTE: conservative approximation of the skip gate in CondenseSession
 		// (which checks extracted data, not raw state). Keep aligned.
 		if state.TranscriptPath == "" && len(state.FilesTouched) == 0 && state.StepCount == 0 {
+			emptyActiveSessions++
 			logging.Debug(logCtx, "prepare-commit-msg: fast path skipping empty session",
 				slog.String("session_id", state.SessionID),
 				slog.String("agent_type", string(state.AgentType)),
@@ -1962,9 +1966,15 @@ func (s *ManualCommitStrategy) tryAgentCommitFastPath(ctx context.Context, commi
 	for _, state := range sessions {
 		phases = append(phases, string(state.Phase))
 	}
-	logging.Debug(logCtx, "prepare-commit-msg: fast path found no ACTIVE sessions",
+	message := "prepare-commit-msg: fast path found no ACTIVE sessions"
+	if activeSessions > 0 && emptyActiveSessions == activeSessions {
+		message = "prepare-commit-msg: fast path skipped all ACTIVE sessions as empty"
+	}
+	logging.Debug(logCtx, message,
 		slog.Bool("no_tty", noTTY),
 		slog.Int("sessions", len(sessions)),
+		slog.Int("active_sessions", activeSessions),
+		slog.Int("empty_active_sessions", emptyActiveSessions),
 		slog.Any("session_phases", phases),
 	)
 	return false
