@@ -10,13 +10,22 @@ With Entire, you can:
 - **Onboard faster** — show the path from prompt → change → commit
 - **Maintain traceability** — support audit and compliance requirements when needed
 
+## Why Entire
+
+- **Understand why code changed, not just what** — Transcripts, prompts, files touched, token usage, tool calls, and more are captured alongside every commit.
+- **Rewind and resume from any checkpoint** — Go back to any previous agent session and pick up exactly where you or a coworker left off.
+- **Full context preserved and searchable** — A versioned record of every AI interaction tied to your git history, with nothing lost.
+- **Zero context switching** — Git-native, two-step setup, works with Claude Code, Gemini, and more.
+
 ## Table of Contents
 
+- [Why Entire](#why-entire)
 - [Quick Start](#quick-start)
 - [Typical Workflow](#typical-workflow)
 - [Key Concepts](#key-concepts)
   - [How It Works](#how-it-works)
   - [Strategy](#strategy)
+- [Local Device Auth Testing](#local-device-auth-testing)
 - [Commands Reference](#commands-reference)
 - [Configuration](#configuration)
 - [Security & Privacy](#security--privacy)
@@ -29,7 +38,7 @@ With Entire, you can:
 
 - Git
 - macOS or Linux (Windows via WSL)
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [OpenCode](https://opencode.ai/docs/cli/), or [Cursor](https://www.cursor.com/) installed and authenticated
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [OpenCode](https://opencode.ai/docs/cli/), [Cursor](https://www.cursor.com/), [Factory AI Droid](https://www.factory.ai/), or [GitHub Copilot CLI](https://docs.github.com/en/copilot) installed and authenticated
 
 ## Quick Start
 
@@ -56,13 +65,13 @@ entire status
 entire enable
 ```
 
-This installs agent and git hooks to work with your AI agent (Claude Code, Gemini CLI, OpenCode, or Cursor). You'll be prompted to select which agents to enable. To enable a specific agent non-interactively, use `entire enable --agent <name>` (e.g., `entire enable --agent cursor`).
+This installs agent and git hooks to work with your AI agent (Claude Code, Gemini CLI, OpenCode, Cursor, Factory AI Droid, or Copilot CLI). You'll be prompted to select which agents to enable. To enable a specific agent non-interactively, use `entire enable --agent <name>` (e.g., `entire enable --agent cursor`).
 
 The hooks capture session data as you work. Checkpoints are created when you or the agent make a git commit. Your code commits stay clean, Entire never creates commits on your active branch. All session metadata is stored on a separate `entire/checkpoints/v1` branch.
 
 ### 2. Work with Your AI Agent
 
-Just use Claude Code, Gemini CLI, OpenCode, or Cursor normally. Entire runs in the background, tracking your session:
+Just use Claude Code, Gemini CLI, OpenCode, Cursor, Factory AI Droid, or Copilot CLI normally. Entire runs in the background, tracking your session:
 
 ```
 entire status  # Check current session status anytime
@@ -152,6 +161,33 @@ Entire works seamlessly with [git worktrees](https://git-scm.com/docs/git-worktr
 
 Multiple AI sessions can run on the same commit. If you start a second session while another has uncommitted work, Entire warns you and tracks them separately. Both sessions' checkpoints are preserved and can be rewound independently.
 
+## Local Device Auth Testing
+
+If you're working on the CLI device auth flow against a local `entire.io` checkout:
+
+```bash
+# In your app repo
+cd ../entire.io-1
+mise run dev
+
+# In this repo, point the CLI at the local API
+cd ../cli
+export ENTIRE_API_BASE_URL=http://localhost:8787
+
+# Run the smoke test
+./scripts/local-device-auth-smoke.sh
+```
+
+Useful commands while developing:
+
+```bash
+# Run the login flow against a local server (prompts to press Enter before opening the browser)
+go run ./cmd/entire login --insecure-http-auth
+
+# Run the focused integration coverage for login
+go test -tags=integration ./cmd/entire/cli/integration_test -run TestLogin
+```
+
 ## Commands Reference
 
 | Command          | Description                                                                                       |
@@ -161,6 +197,7 @@ Multiple AI sessions can run on the same commit. If you start a second session w
 | `entire doctor`  | Fix or clean up stuck sessions                                                                    |
 | `entire enable`  | Enable Entire in your repository                                                                  |
 | `entire explain` | Explain a session or commit                                                                       |
+| `entire login`   | Authenticate the CLI with Entire device auth                                                      |
 | `entire reset`   | Delete the shadow branch and session state for the current HEAD commit                            |
 | `entire resume`  | Switch to a branch, restore latest checkpointed session metadata, and show command(s) to continue |
 | `entire rewind`  | Rewind to a previous checkpoint                                                                   |
@@ -171,12 +208,13 @@ Multiple AI sessions can run on the same commit. If you start a second session w
 
 | Flag                   | Description                                                           |
 | ---------------------- | --------------------------------------------------------------------- |
-| `--agent <name>`       | AI agent to install hooks for: `claude-code`, `gemini`, `opencode`, or `cursor` |
+| `--agent <name>`       | AI agent to install hooks for: `claude-code`, `gemini`, `opencode`, `cursor`, `factoryai-droid`, or `copilot-cli` |
 | `--force`, `-f`        | Force reinstall hooks (removes existing Entire hooks first)           |
 | `--local`              | Write settings to `settings.local.json` instead of `settings.json`    |
 | `--project`            | Write settings to `settings.json` even if it already exists           |
-| `--skip-push-sessions` | Disable automatic pushing of session logs on git push                 |
-| `--telemetry=false`    | Disable anonymous usage analytics                                     |
+| `--skip-push-sessions`       | Disable automatic pushing of session logs on git push                 |
+| `--checkpoint-remote <provider:owner/repo>` | Push checkpoint branches to a separate repo (e.g., `github:org/checkpoints-repo`) |
+| `--telemetry=false`          | Disable anonymous usage analytics                                     |
 
 **Examples:**
 
@@ -215,13 +253,14 @@ Personal overrides, gitignored by default:
 
 ### Configuration Options
 
-| Option                               | Values                           | Description                                          |
-| ------------------------------------ | -------------------------------- | ---------------------------------------------------- |
-| `enabled`                            | `true`, `false`                  | Enable/disable Entire                                |
-| `log_level`                          | `debug`, `info`, `warn`, `error` | Logging verbosity                                    |
-| `strategy_options.push_sessions`     | `true`, `false`                  | Auto-push `entire/checkpoints/v1` branch on git push |
-| `strategy_options.summarize.enabled` | `true`, `false`                  | Auto-generate AI summaries at commit time            |
-| `telemetry`                          | `true`, `false`                  | Send anonymous usage statistics to Posthog           |
+| Option                                | Values                           | Description                                                        |
+| ------------------------------------- | -------------------------------- | ------------------------------------------------------------------ |
+| `enabled`                             | `true`, `false`                  | Enable/disable Entire                                              |
+| `log_level`                           | `debug`, `info`, `warn`, `error` | Logging verbosity                                                  |
+| `strategy_options.push_sessions`      | `true`, `false`                  | Auto-push `entire/checkpoints/v1` branch on git push               |
+| `strategy_options.checkpoint_remote`  | `{"provider": "github", "repo": "org/repo"}` | Push checkpoint branches to a separate repo (see below) |
+| `strategy_options.summarize.enabled`  | `true`, `false`                  | Auto-generate AI summaries at commit time                          |
+| `telemetry`                           | `true`, `false`                  | Send anonymous usage statistics to Posthog                         |
 
 ### Agent Hook Configuration
 
@@ -232,9 +271,39 @@ Each agent stores its hook configuration in its own directory. When you run `ent
 | Claude Code | `.claude/settings.json`       | JSON hooks config |
 | Gemini CLI  | `.gemini/settings.json`       | JSON hooks config |
 | OpenCode    | `.opencode/plugins/entire.ts` | TypeScript plugin |
-| Cursor  | `.cursor/hooks.json`          | JSON hooks config |
+| Cursor      | `.cursor/hooks.json`          | JSON hooks config |
+| Factory AI Droid | `.factory/settings.json` | JSON hooks config |
+| Copilot CLI | `.github/hooks/entire.json`   | JSON hooks config |
 
 You can enable multiple agents at the same time — each agent's hooks are independent. Entire detects which agents are active by checking for installed hooks, not by a setting in `settings.json`.
+
+### Checkpoint Remote
+
+By default, Entire pushes `entire/checkpoints/v1` to the same remote as your code. If you want to push checkpoint data to a separate repo (e.g., a private repo for public projects), configure `checkpoint_remote` with a structured provider and repo:
+
+```json
+{
+  "strategy_options": {
+    "checkpoint_remote": {
+      "provider": "github",
+      "repo": "myorg/checkpoints-private"
+    }
+  }
+}
+```
+
+Or via the CLI:
+
+```bash
+entire enable --checkpoint-remote github:myorg/checkpoints-private
+```
+
+Entire derives the git URL automatically using the same protocol (SSH or HTTPS) as your push remote. It will:
+
+- Fetch the checkpoint branch locally if it exists on the remote but not locally (one-time)
+- Push `entire/checkpoints/v1` to the checkpoint repo instead of your default push remote
+- Skip pushing if a fork is detected (push remote owner differs from checkpoint repo owner)
+- If the remote is unreachable, warn and continue without blocking your main push
 
 ### Auto-Summarization
 
@@ -308,6 +377,38 @@ Or select Cursor IDE from the interactive agent picker when running `entire enab
 Rewind is not available at this time, but other commands (`doctor`, `status` etc.) work the same as all other agents.
 
 If you run into any issues with Cursor integration, please [open an issue](https://github.com/entireio/cli/issues).
+
+### Factory AI Droid
+
+Factory AI Droid support is currently in preview. Entire can work with [Factory AI Droid](https://www.factory.ai/) as an alternative to Claude Code, or alongside it — you can have multiple agents' hooks enabled at the same time.
+
+To enable:
+
+```bash
+entire enable --agent factoryai-droid
+```
+
+Or select Factory AI Droid from the interactive agent picker when running `entire enable`.
+
+All commands (`rewind`, `resume`, `status`, `doctor`, etc.) work the same regardless of which agent is configured.
+
+If you run into any issues with Factory AI Droid integration, please [open an issue](https://github.com/entireio/cli/issues).
+
+### Copilot CLI
+
+GitHub Copilot CLI support is currently in preview. Entire can work with [GitHub Copilot CLI](https://docs.github.com/en/copilot) as an alternative to Claude Code, or alongside it — you can have multiple agents' hooks enabled at the same time.
+
+To enable:
+
+```bash
+entire enable --agent copilot-cli
+```
+
+Or select Copilot CLI from the interactive agent picker when running `entire enable`.
+
+All commands (`rewind`, `resume`, `status`, `doctor`, etc.) work the same regardless of which agent is configured.
+
+If you run into any issues with Copilot CLI integration, please [open an issue](https://github.com/entireio/cli/issues).
 
 ## Security & Privacy
 

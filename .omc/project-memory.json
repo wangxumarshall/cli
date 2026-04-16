@@ -1,0 +1,207 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1776302584724,
+  "projectRoot": "/Users/wangxu/1-project/entireio-cli/cli",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Go",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "go.mod"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": "go",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "docs",
+      "scripts"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "cmd": {
+      "path": "cmd",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1776302584718,
+      "keyFiles": []
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 2,
+      "lastAccessed": 1776302584719,
+      "keyFiles": [
+        "KNOWN_LIMITATIONS.md",
+        "security-and-privacy.md"
+      ]
+    },
+    "e2e": {
+      "path": "e2e",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1776302584719,
+      "keyFiles": [
+        "README.md"
+      ]
+    },
+    "mise-tasks": {
+      "path": "mise-tasks",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1776302584719,
+      "keyFiles": [
+        "build",
+        "completions"
+      ]
+    },
+    "perf": {
+      "path": "perf",
+      "purpose": null,
+      "fileCount": 3,
+      "lastAccessed": 1776302584720,
+      "keyFiles": [
+        "context.go",
+        "span.go",
+        "span_test.go"
+      ]
+    },
+    "redact": {
+      "path": "redact",
+      "purpose": null,
+      "fileCount": 4,
+      "lastAccessed": 1776302584720,
+      "keyFiles": [
+        "pii.go",
+        "pii_test.go",
+        "redact.go",
+        "redact_test.go"
+      ]
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 7,
+      "lastAccessed": 1776302584720,
+      "keyFiles": [
+        "download-e2e-artifacts.sh",
+        "install.sh",
+        "local-device-auth-smoke.sh",
+        "migrate-sessions.sh",
+        "test-attribution-e2e.sh"
+      ]
+    },
+    "e2e/tests": {
+      "path": "e2e/tests",
+      "purpose": "Test files",
+      "fileCount": 19,
+      "lastAccessed": 1776302584721,
+      "keyFiles": [
+        "attribution_test.go",
+        "checkpoint_metadata_test.go",
+        "deleted_files_test.go"
+      ]
+    },
+    "mise-tasks/test": {
+      "path": "mise-tasks/test",
+      "purpose": "Test files",
+      "fileCount": 0,
+      "lastAccessed": 1776302584721,
+      "keyFiles": []
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "",
+      "accessCount": 1,
+      "lastAccessed": 1776302635500,
+      "type": "directory"
+    },
+    {
+      "path": "cmd/entire/cli/agent/opencode/opencode.go",
+      "accessCount": 1,
+      "lastAccessed": 1776302639059,
+      "type": "file"
+    },
+    {
+      "path": "cmd/entire/cli/agent/opencode/lifecycle.go",
+      "accessCount": 1,
+      "lastAccessed": 1776302646088,
+      "type": "file"
+    },
+    {
+      "path": "cmd/entire/cli/agent/opencode/plugin.go",
+      "accessCount": 1,
+      "lastAccessed": 1776302651917,
+      "type": "file"
+    },
+    {
+      "path": "cmd/entire/cli/agent/opencode/cli_commands.go",
+      "accessCount": 1,
+      "lastAccessed": 1776302651973,
+      "type": "file"
+    },
+    {
+      "path": "cmd/entire/cli/agent/opencode/entire_plugin.ts",
+      "accessCount": 1,
+      "lastAccessed": 1776302655015,
+      "type": "file"
+    },
+    {
+      "path": "cmd/entire/cli/hooks_cmd.go",
+      "accessCount": 1,
+      "lastAccessed": 1776302661568,
+      "type": "directory"
+    },
+    {
+      "path": ".opencode/plugins/entire.ts",
+      "accessCount": 1,
+      "lastAccessed": 1776302686952,
+      "type": "file"
+    },
+    {
+      "path": "cmd/entire/cli/agent/opencode",
+      "accessCount": 1,
+      "lastAccessed": 1776302697220,
+      "type": "directory"
+    },
+    {
+      "path": "cmd/entire/cli",
+      "accessCount": 1,
+      "lastAccessed": 1776302700857,
+      "type": "directory"
+    },
+    {
+      "path": "cmd/entire/cli/agent/opencode/hooks.go",
+      "accessCount": 1,
+      "lastAccessed": 1776302704156,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

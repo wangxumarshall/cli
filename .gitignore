@@ -39,6 +39,7 @@ go.work.sum
 /entire
 /vogon
 /testreport
+/bin
 
 # Build output directory
 /dist/
@@ -59,6 +60,7 @@ cmd/entire/entire
 docs/requirements
 docs/plans
 docs/reviews
+docs/superpowers
 tmp/
 
 # Git worktrees for isolated development

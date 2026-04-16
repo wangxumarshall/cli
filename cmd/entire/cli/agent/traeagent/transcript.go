@@ -8,9 +8,6 @@ import (
 	"os"
 )
 
-// Scanner buffer size for large transcript files (10MB)
-const scannerBufferSize = 10 * 1024 * 1024
-
 // TrajectoryEvent represents a single event in Trae Agent's trajectory
 
 type TrajectoryEvent struct {
@@ -49,7 +46,7 @@ func ParseTrajectory(data []byte) (*Trajectory, error) {
 func extractModifiedFiles(data []byte) ([]string, error) {
 	trajectory, err := ParseTrajectory(data)
 	if err != nil {
-		return []string{}, nil // Return empty slice for now if parsing fails
+		return []string{}, err // Return empty slice with error if parsing fails
 	}
 
 	fileSet := make(map[string]bool)
@@ -122,7 +119,7 @@ func (t *TraeAgent) GetTranscriptPosition(path string) (int, error) {
 	defer file.Close()
 
 	// Read the entire file and parse it to get the event count
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // Path comes from Trae Agent trajectory location
 	if err != nil {
 		return 0, fmt.Errorf("failed to read trajectory file: %w", err)
 	}
@@ -149,7 +146,7 @@ func (t *TraeAgent) ExtractModifiedFilesFromOffset(path string, startOffset int)
 	defer file.Close()
 
 	// Read the entire file and parse it
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // Path comes from Trae Agent trajectory location
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to read trajectory file: %w", err)
 	}

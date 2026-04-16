@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/testutil"
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing/object"
+	"github.com/stretchr/testify/require"
 )
 
 // mockLifecycleAgent is a minimal Agent implementation for lifecycle tests.
@@ -152,6 +152,79 @@ func TestHandleLifecycleSessionStart_EmptySessionID(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no session_id") {
 		t.Errorf("expected error message about missing session_id, got: %v", err)
+	}
+}
+
+// mockHookResponseAgent extends mockLifecycleAgent with HookResponseWriter.
+type mockHookResponseAgent struct {
+	mockLifecycleAgent
+
+	lastMessage string
+}
+
+var _ agent.HookResponseWriter = (*mockHookResponseAgent)(nil)
+
+func (m *mockHookResponseAgent) WriteHookResponse(message string) error {
+	m.lastMessage = message
+	return nil
+}
+
+func newMockHookResponseAgent() *mockHookResponseAgent {
+	return &mockHookResponseAgent{
+		mockLifecycleAgent: mockLifecycleAgent{
+			name:      "mock-hrw",
+			agentType: "Mock HRW Agent",
+		},
+	}
+}
+
+func TestHandleLifecycleSessionStart_EmptyRepoWarning(t *testing.T) {
+	// Cannot use t.Parallel() because we use t.Chdir()
+	tmpDir := t.TempDir()
+	testutil.InitRepo(t, tmpDir) // no commits — empty repo
+	t.Chdir(tmpDir)
+	paths.ClearWorktreeRootCache()
+
+	ag := newMockHookResponseAgent()
+	event := &agent.Event{
+		Type:      agent.SessionStart,
+		SessionID: "test-empty-repo-warning",
+		Timestamp: time.Now(),
+	}
+
+	err := handleLifecycleSessionStart(context.Background(), ag, event)
+	require.NoError(t, err)
+
+	if !strings.Contains(ag.lastMessage, "No commits yet") {
+		t.Errorf("expected message containing 'No commits yet', got: %q", ag.lastMessage)
+	}
+}
+
+func TestHandleLifecycleSessionStart_DefaultMessageWithCommits(t *testing.T) {
+	// Cannot use t.Parallel() because we use t.Chdir()
+	tmpDir := t.TempDir()
+	testutil.InitRepo(t, tmpDir)
+	testutil.WriteFile(t, tmpDir, "init.txt", "init")
+	testutil.GitAdd(t, tmpDir, "init.txt")
+	testutil.GitCommit(t, tmpDir, "init")
+	t.Chdir(tmpDir)
+	paths.ClearWorktreeRootCache()
+
+	ag := newMockHookResponseAgent()
+	event := &agent.Event{
+		Type:      agent.SessionStart,
+		SessionID: "test-default-message",
+		Timestamp: time.Now(),
+	}
+
+	err := handleLifecycleSessionStart(context.Background(), ag, event)
+	require.NoError(t, err)
+
+	if !strings.Contains(ag.lastMessage, "linked to your next commit") {
+		t.Errorf("expected message containing 'linked to your next commit', got: %q", ag.lastMessage)
+	}
+	if strings.Contains(ag.lastMessage, "No commits yet") {
+		t.Errorf("did not expect empty-repo warning, got: %q", ag.lastMessage)
 	}
 }
 
@@ -303,17 +376,10 @@ func TestHandleLifecycleTurnEnd_EmptyRepository(t *testing.T) {
 
 	err := handleLifecycleTurnEnd(context.Background(), ag, event)
 
-	// Should return a SilentError wrapping ErrEmptyRepository
-	if err == nil {
-		t.Error("expected error for empty repository, got nil")
-	}
-
-	var silentErr *SilentError
-	if !errors.As(err, &silentErr) {
-		t.Errorf("expected SilentError, got: %T", err)
-	}
-	if !errors.Is(silentErr.Unwrap(), strategy.ErrEmptyRepository) {
-		t.Errorf("expected ErrEmptyRepository, got: %v", silentErr.Unwrap())
+	// Should return nil so the hook exits 0 — agents treat non-zero as failure.
+	// The user was already warned at session start.
+	if err != nil {
+		t.Errorf("expected nil for empty repository (graceful no-op), got: %v", err)
 	}
 }
 
@@ -372,9 +438,7 @@ func TestHandleLifecycleCompaction_PreservesTranscriptOffset(t *testing.T) {
 	if loadErr != nil {
 		t.Fatalf("Failed to load session state after compaction: %v", loadErr)
 	}
-	if loadedState == nil {
-		t.Fatal("Session state is nil after compaction")
-	}
+	require.NotNil(t, loadedState, "Session state is nil after compaction")
 	if loadedState.CheckpointTranscriptStart != 50 {
 		t.Errorf("CheckpointTranscriptStart = %d, want 50 (compaction should preserve offset)",
 			loadedState.CheckpointTranscriptStart)
@@ -598,5 +662,201 @@ func setupGitRepoWithCommit(t *testing.T, dir string) {
 		},
 	}); err != nil {
 		t.Logf("Note: Could not create commit: %v", err)
+	}
+}
+
+// --- Prompt backfill tests ---
+
+// mockPromptExtractorAgent implements PromptExtractor for lifecycle tests.
+type mockPromptExtractorAgent struct {
+	mockLifecycleAgent
+
+	prompts    []string
+	extractErr error
+}
+
+var _ agent.PromptExtractor = (*mockPromptExtractorAgent)(nil)
+
+func (m *mockPromptExtractorAgent) ExtractPrompts(string, int) ([]string, error) {
+	return m.prompts, m.extractErr
+}
+
+func TestHandleLifecycleTurnStart_WritesPromptContent(t *testing.T) {
+	// Cannot use t.Parallel() because we use t.Chdir()
+	tmpDir := t.TempDir()
+	testutil.InitRepo(t, tmpDir)
+	testutil.WriteFile(t, tmpDir, "init.txt", "init")
+	testutil.GitAdd(t, tmpDir, "init.txt")
+	testutil.GitCommit(t, tmpDir, "init")
+	t.Chdir(tmpDir)
+	paths.ClearWorktreeRootCache()
+
+	ag := newMockAgent()
+	sessionID := "test-prompt-content"
+	event := &agent.Event{
+		Type:      agent.TurnStart,
+		SessionID: sessionID,
+		Prompt:    "create a file called hello.txt",
+		Timestamp: time.Now(),
+	}
+
+	require.NoError(t, handleLifecycleTurnStart(context.Background(), ag, event))
+
+	sessionDir := paths.SessionMetadataDirFromSessionID(sessionID)
+	sessionDirAbs, err := paths.AbsPath(context.Background(), sessionDir)
+	require.NoError(t, err)
+
+	data, readErr := os.ReadFile(filepath.Join(sessionDirAbs, paths.PromptFileName))
+	require.NoError(t, readErr)
+
+	if string(data) != "create a file called hello.txt" {
+		t.Errorf("expected prompt content 'create a file called hello.txt', got %q", string(data))
+	}
+}
+
+func TestHandleLifecycleTurnEnd_BackfillsPromptFromTranscript(t *testing.T) {
+	// Cannot use t.Parallel() because we use t.Chdir()
+	tmpDir := t.TempDir()
+	testutil.InitRepo(t, tmpDir)
+	testutil.WriteFile(t, tmpDir, "init.txt", "init")
+	testutil.GitAdd(t, tmpDir, "init.txt")
+	testutil.GitCommit(t, tmpDir, "init")
+	t.Chdir(tmpDir)
+	paths.ClearWorktreeRootCache()
+
+	// Create a transcript file
+	transcriptPath := filepath.Join(tmpDir, "transcript.jsonl")
+	require.NoError(t, os.WriteFile(transcriptPath, []byte(`{"type":"user","message":"test"}`+"\n"), 0o600))
+
+	sessionID := "test-backfill"
+	ag := &mockPromptExtractorAgent{
+		mockLifecycleAgent: mockLifecycleAgent{
+			name:           "mock-prompt",
+			agentType:      "Mock Prompt Agent",
+			transcriptData: []byte(`{"type":"user","message":"test"}` + "\n"),
+		},
+		prompts: []string{"create a file called notes/deep.md"},
+	}
+	event := &agent.Event{
+		Type:       agent.TurnEnd,
+		SessionID:  sessionID,
+		SessionRef: transcriptPath,
+		Timestamp:  time.Now(),
+	}
+
+	// Do NOT create prompt.txt — simulating hooks never firing.
+	// TurnEnd should backfill from transcript via PromptExtractor.
+	require.NoError(t, handleLifecycleTurnEnd(context.Background(), ag, event))
+
+	sessionDir := paths.SessionMetadataDirFromSessionID(sessionID)
+	sessionDirAbs, err := paths.AbsPath(context.Background(), sessionDir)
+	require.NoError(t, err)
+
+	data, readErr := os.ReadFile(filepath.Join(sessionDirAbs, paths.PromptFileName))
+	require.NoError(t, readErr, "prompt.txt should have been created by backfill")
+
+	if string(data) != "create a file called notes/deep.md" {
+		t.Errorf("expected backfilled prompt, got %q", string(data))
+	}
+}
+
+func TestHandleLifecycleTurnEnd_NoBackfillWhenPromptFileHasContent(t *testing.T) {
+	// Cannot use t.Parallel() because we use t.Chdir()
+	tmpDir := t.TempDir()
+	testutil.InitRepo(t, tmpDir)
+	testutil.WriteFile(t, tmpDir, "init.txt", "init")
+	testutil.GitAdd(t, tmpDir, "init.txt")
+	testutil.GitCommit(t, tmpDir, "init")
+	t.Chdir(tmpDir)
+	paths.ClearWorktreeRootCache()
+
+	transcriptPath := filepath.Join(tmpDir, "transcript.jsonl")
+	require.NoError(t, os.WriteFile(transcriptPath, []byte(`{"type":"user","message":"test"}`+"\n"), 0o600))
+
+	sessionID := "test-no-backfill"
+	ag := &mockPromptExtractorAgent{
+		mockLifecycleAgent: mockLifecycleAgent{
+			name:           "mock-prompt",
+			agentType:      "Mock Prompt Agent",
+			transcriptData: []byte(`{"type":"user","message":"test"}` + "\n"),
+		},
+		prompts: []string{"should NOT appear"},
+	}
+	event := &agent.Event{
+		Type:       agent.TurnEnd,
+		SessionID:  sessionID,
+		SessionRef: transcriptPath,
+		Timestamp:  time.Now(),
+	}
+
+	// Pre-create prompt.txt with content — simulating hooks that captured the prompt.
+	sessionDir := paths.SessionMetadataDirFromSessionID(sessionID)
+	sessionDirAbs, err := paths.AbsPath(context.Background(), sessionDir)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(sessionDirAbs, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(sessionDirAbs, paths.PromptFileName), []byte("original prompt"), 0o600))
+
+	require.NoError(t, handleLifecycleTurnEnd(context.Background(), ag, event))
+
+	data, readErr := os.ReadFile(filepath.Join(sessionDirAbs, paths.PromptFileName))
+	require.NoError(t, readErr)
+
+	if string(data) != "original prompt" {
+		t.Errorf("expected original prompt preserved, got %q", string(data))
+	}
+}
+
+func TestHandleLifecycleTurnEnd_BackfillUpdatesSessionState(t *testing.T) {
+	// Cannot use t.Parallel() because we use t.Chdir()
+	tmpDir := t.TempDir()
+	testutil.InitRepo(t, tmpDir)
+	testutil.WriteFile(t, tmpDir, "init.txt", "init")
+	testutil.GitAdd(t, tmpDir, "init.txt")
+	testutil.GitCommit(t, tmpDir, "init")
+	t.Chdir(tmpDir)
+	paths.ClearWorktreeRootCache()
+
+	transcriptPath := filepath.Join(tmpDir, "transcript.jsonl")
+	require.NoError(t, os.WriteFile(transcriptPath, []byte(`{"type":"user","message":"test"}`+"\n"), 0o600))
+
+	sessionID := "test-backfill-state"
+	ag := &mockPromptExtractorAgent{
+		mockLifecycleAgent: mockLifecycleAgent{
+			name:           "mock-prompt",
+			agentType:      "Mock Prompt Agent",
+			transcriptData: []byte(`{"type":"user","message":"test"}` + "\n"),
+		},
+		prompts: []string{"first prompt", "second prompt"},
+	}
+	event := &agent.Event{
+		Type:       agent.TurnEnd,
+		SessionID:  sessionID,
+		SessionRef: transcriptPath,
+		Timestamp:  time.Now(),
+	}
+
+	// Pre-create session state with BaseCommit set (simulating InitializeSession
+	// that ran during TurnStart but with empty prompt due to exec mode).
+	// BaseCommit must be set so SaveStep doesn't reinitialize the state.
+	repo, err := strategy.OpenRepository(context.Background())
+	require.NoError(t, err)
+	head, err := repo.Head()
+	require.NoError(t, err)
+	state := &strategy.SessionState{
+		SessionID:  sessionID,
+		BaseCommit: head.Hash().String(),
+		LastPrompt: "",
+	}
+	require.NoError(t, strategy.SaveSessionState(context.Background(), state))
+
+	require.NoError(t, handleLifecycleTurnEnd(context.Background(), ag, event))
+
+	// Verify session state was updated with the last prompt
+	updated, loadErr := strategy.LoadSessionState(context.Background(), sessionID)
+	require.NoError(t, loadErr)
+	require.NotNil(t, updated)
+
+	if updated.LastPrompt != "second prompt" {
+		t.Errorf("expected LastPrompt 'second prompt', got %q", updated.LastPrompt)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/entireio/cli/cmd/entire/cli/jsonutil"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
@@ -58,6 +59,9 @@ type EntireSettings struct {
 	// nil = not asked yet (show prompt), true = opted in, false = opted out
 	Telemetry *bool `json:"telemetry,omitempty"`
 
+	// Redaction configures PII redaction behavior for transcripts and metadata.
+	Redaction *RedactionSettings `json:"redaction,omitempty"`
+
 	// CommitLinking controls how commits are linked to agent sessions.
 	// "always" = auto-link without prompting, "prompt" = ask on each commit.
 	// Defaults to "prompt" (preserves existing user behavior).
@@ -70,6 +74,21 @@ type EntireSettings struct {
 	// Deprecated: no longer used. Exists to tolerate old settings files
 	// that still contain "strategy": "auto-commit" or similar.
 	Strategy string `json:"strategy,omitempty"`
+}
+
+// RedactionSettings configures redaction behavior beyond the default secret detection.
+type RedactionSettings struct {
+	PII *PIISettings `json:"pii,omitempty"`
+}
+
+// PIISettings configures PII detection categories.
+// When Enabled is true, email and phone default to true; address defaults to false.
+type PIISettings struct {
+	Enabled        bool              `json:"enabled"`
+	Email          *bool             `json:"email,omitempty"`
+	Phone          *bool             `json:"phone,omitempty"`
+	Address        *bool             `json:"address,omitempty"`
+	CustomPatterns map[string]string `json:"custom_patterns,omitempty"`
 }
 
 // GetCommitLinking returns the effective commit linking mode.
@@ -234,6 +253,16 @@ func mergeJSON(settings *EntireSettings, data []byte) error {
 		settings.Telemetry = &t
 	}
 
+	// Merge redaction sub-fields if present (field-level, not wholesale replace).
+	if redactionRaw, ok := raw["redaction"]; ok {
+		if settings.Redaction == nil {
+			settings.Redaction = &RedactionSettings{}
+		}
+		if err := mergeRedaction(settings.Redaction, redactionRaw); err != nil {
+			return fmt.Errorf("parsing redaction field: %w", err)
+		}
+	}
+
 	// Override commit_linking if present and non-empty
 	if commitLinkingRaw, ok := raw["commit_linking"]; ok {
 		var cl string
@@ -262,6 +291,74 @@ func mergeJSON(settings *EntireSettings, data []byte) error {
 	return nil
 }
 
+// mergeRedaction merges redaction overrides into existing RedactionSettings.
+// Only fields present in the override JSON are applied.
+func mergeRedaction(dst *RedactionSettings, data json.RawMessage) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("parsing redaction: %w", err)
+	}
+	if piiRaw, ok := raw["pii"]; ok {
+		if dst.PII == nil {
+			dst.PII = &PIISettings{}
+		}
+		if err := mergePIISettings(dst.PII, piiRaw); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// mergePIISettings merges PII overrides into existing PIISettings.
+// Only fields present in the override JSON are applied; missing fields
+// are preserved from the base settings.
+func mergePIISettings(dst *PIISettings, data json.RawMessage) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("parsing pii: %w", err)
+	}
+	if v, ok := raw["enabled"]; ok {
+		if err := json.Unmarshal(v, &dst.Enabled); err != nil {
+			return fmt.Errorf("parsing pii.enabled: %w", err)
+		}
+	}
+	if v, ok := raw["email"]; ok {
+		var b bool
+		if err := json.Unmarshal(v, &b); err != nil {
+			return fmt.Errorf("parsing pii.email: %w", err)
+		}
+		dst.Email = &b
+	}
+	if v, ok := raw["phone"]; ok {
+		var b bool
+		if err := json.Unmarshal(v, &b); err != nil {
+			return fmt.Errorf("parsing pii.phone: %w", err)
+		}
+		dst.Phone = &b
+	}
+	if v, ok := raw["address"]; ok {
+		var b bool
+		if err := json.Unmarshal(v, &b); err != nil {
+			return fmt.Errorf("parsing pii.address: %w", err)
+		}
+		dst.Address = &b
+	}
+	if v, ok := raw["custom_patterns"]; ok {
+		var cp map[string]string
+		if err := json.Unmarshal(v, &cp); err != nil {
+			return fmt.Errorf("parsing pii.custom_patterns: %w", err)
+		}
+		if dst.CustomPatterns == nil {
+			dst.CustomPatterns = cp
+		} else {
+			for k, val := range cp {
+				dst.CustomPatterns[k] = val
+			}
+		}
+	}
+	return nil
+}
+
 // IsSetUp returns true if Entire has been set up in the current repository.
 // This checks if .entire/settings.json exists.
 // Use this to avoid creating files/directories in repos where Entire was never enabled.
@@ -271,6 +368,21 @@ func IsSetUp(ctx context.Context) bool {
 		return false
 	}
 	_, err = os.Stat(settingsFileAbs)
+	return err == nil
+}
+
+// IsSetUpAny returns true if Entire has been set up in the current repository,
+// checking both .entire/settings.json and .entire/settings.local.json.
+// Use this to detect any prior setup, even if only local settings exist.
+func IsSetUpAny(ctx context.Context) bool {
+	if IsSetUp(ctx) {
+		return true
+	}
+	localFileAbs, err := paths.AbsPath(ctx, EntireSettingsLocalFile)
+	if err != nil {
+		return false
+	}
+	_, err = os.Lstat(localFileAbs)
 	return err == nil
 }
 
@@ -286,6 +398,16 @@ func IsSetUpAndEnabled(ctx context.Context) bool {
 		return false
 	}
 	return s.Enabled
+}
+
+// IsCheckpointsV2Enabled checks if checkpoints v2 is enabled in settings.
+// Returns false by default if settings cannot be loaded or the key is missing.
+func IsCheckpointsV2Enabled(ctx context.Context) bool {
+	settings, err := Load(ctx)
+	if err != nil {
+		return false
+	}
+	return settings.IsCheckpointsV2Enabled()
 }
 
 // IsSummarizeEnabled checks if auto-summarize is enabled in settings.
@@ -312,6 +434,59 @@ func (s *EntireSettings) IsSummarizeEnabled() bool {
 		return false
 	}
 	return enabled
+}
+
+// CheckpointRemoteConfig holds the structured checkpoint remote configuration.
+// Stored in strategy_options.checkpoint_remote as {"provider": "github", "repo": "org/repo"}.
+type CheckpointRemoteConfig struct {
+	Provider string // e.g., "github"
+	Repo     string // e.g., "org/checkpoints-repo"
+}
+
+// Owner returns the owner portion of the repo field (before the slash).
+// Returns empty string if the repo field doesn't contain a slash.
+func (c *CheckpointRemoteConfig) Owner() string {
+	parts := strings.SplitN(c.Repo, "/", 2)
+	if len(parts) < 2 {
+		return ""
+	}
+	return parts[0]
+}
+
+// GetCheckpointRemote returns the configured checkpoint remote.
+// Expects a structured object: {"provider": "github", "repo": "org/repo"}.
+// Returns nil if not configured, wrong type, or missing required fields.
+func (s *EntireSettings) GetCheckpointRemote() *CheckpointRemoteConfig {
+	if s.StrategyOptions == nil {
+		return nil
+	}
+	val, ok := s.StrategyOptions["checkpoint_remote"]
+	if !ok {
+		return nil
+	}
+	m, ok := val.(map[string]any)
+	if !ok {
+		return nil
+	}
+	provider, providerOK := m["provider"].(string)
+	repo, repoOK := m["repo"].(string)
+	if !providerOK || !repoOK || provider == "" || repo == "" {
+		return nil
+	}
+	if !strings.Contains(repo, "/") {
+		return nil
+	}
+	return &CheckpointRemoteConfig{Provider: provider, Repo: repo}
+}
+
+// IsCheckpointsV2Enabled checks if checkpoints v2 (dual-write to refs/entire/) is enabled.
+// Returns false by default if the key is missing or not a bool.
+func (s *EntireSettings) IsCheckpointsV2Enabled() bool {
+	if s.StrategyOptions == nil {
+		return false
+	}
+	val, ok := s.StrategyOptions["checkpoints_v2"].(bool)
+	return ok && val
 }
 
 // IsPushSessionsDisabled checks if push_sessions is disabled in settings.

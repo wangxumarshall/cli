@@ -120,6 +120,11 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 		hasShadowBranch = err == nil
 	}
 
+	// Re-resolve transcript path before any reads — handles agents that relocate
+	// transcripts mid-session (e.g., Cursor CLI flat → nested layout change).
+	// Errors are ignored; downstream readers handle missing transcripts gracefully.
+	resolveTranscriptPath(state) //nolint:errcheck,gosec // best-effort; downstream readers handle missing files
+
 	var sessionData *ExtractedSessionData
 	if hasShadowBranch {
 		var extractErr error
@@ -142,14 +147,11 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 	}
 
 	// Backfill session state token usage from the freshly-extracted transcript.
-	// Some agents (e.g., Copilot CLI) write aggregate token data (session.shutdown)
-	// AFTER all hooks return, so state.TokenUsage from turn-end only has fallback data.
-	// By condensation time, the transcript has the authoritative totals.
-	// Only replace when we got authoritative data (e.g., session.shutdown provides
-	// InputTokens; the fallback path only captures OutputTokens). This avoids
-	// overwriting accumulated multi-checkpoint totals with partial checkpoint data.
-	if sessionData.TokenUsage != nil && sessionData.TokenUsage.InputTokens > 0 {
-		state.TokenUsage = sessionData.TokenUsage
+	// Copilot CLI writes session.shutdown after the hooks return, so by condensation
+	// time we can recover the authoritative full-session total from the transcript
+	// while keeping checkpoint metadata scoped to CheckpointTranscriptStart.
+	if backfillUsage := sessionStateBackfillTokenUsage(ctx, ag, state.AgentType, sessionData.Transcript, sessionData.TokenUsage); backfillUsage != nil {
+		state.TokenUsage = backfillUsage
 	}
 
 	// For 1:1 checkpoint model: filter files_touched to only include files actually
@@ -290,6 +292,40 @@ func buildSessionMetrics(state *SessionState) *cpkg.SessionMetrics {
 		ContextTokens:     state.ContextTokens,
 		ContextWindowSize: state.ContextWindowSize,
 	}
+}
+
+func hasTokenUsageData(usage *agent.TokenUsage) bool {
+	if usage == nil {
+		return false
+	}
+
+	if usage.InputTokens > 0 || usage.CacheCreationTokens > 0 || usage.CacheReadTokens > 0 || usage.OutputTokens > 0 || usage.APICallCount > 0 {
+		return true
+	}
+
+	return hasTokenUsageData(usage.SubagentTokens)
+}
+
+// sessionStateBackfillTokenUsage returns the best session-level token usage to
+// persist in session state after condensation.
+func sessionStateBackfillTokenUsage(ctx context.Context, ag agent.Agent, agentType types.AgentType, transcript []byte, checkpointUsage *agent.TokenUsage) *agent.TokenUsage {
+	if agentType == agent.AgentTypeCopilotCLI && len(transcript) > 0 {
+		fullSessionUsage := agent.CalculateTokenUsage(ctx, ag, transcript, 0, "")
+		if hasTokenUsageData(fullSessionUsage) {
+			return fullSessionUsage
+		}
+		logging.Debug(ctx, "copilot-cli: full-session token read produced no data, falling back to checkpoint usage")
+	}
+
+	if agentType == agent.AgentTypeCopilotCLI && hasTokenUsageData(checkpointUsage) {
+		return checkpointUsage
+	}
+
+	if checkpointUsage != nil && checkpointUsage.InputTokens > 0 {
+		return checkpointUsage
+	}
+
+	return nil
 }
 
 // attributionOpts provides pre-resolved git objects to avoid redundant reads.
@@ -513,12 +549,13 @@ func (s *ManualCommitStrategy) extractSessionDataFromLiveTranscript(ctx context.
 
 	ag, _ := agent.GetByAgentType(state.AgentType) //nolint:errcheck // ag may be nil for unknown agent types; callers use type assertions so nil is safe
 
-	// Read the live transcript
-	if state.TranscriptPath == "" {
-		return nil, errors.New("no transcript path in session state")
+	// Resolve the transcript path (handles agents that relocate mid-session).
+	transcriptPath, resolveErr := resolveTranscriptPath(state)
+	if resolveErr != nil {
+		return nil, resolveErr
 	}
 
-	liveData, err := os.ReadFile(state.TranscriptPath)
+	liveData, err := os.ReadFile(transcriptPath) //nolint:gosec // path validated by resolveTranscriptPath
 	if err != nil {
 		return nil, fmt.Errorf("failed to read live transcript: %w", err)
 	}
@@ -817,6 +854,7 @@ func (s *ManualCommitStrategy) CondenseSessionByID(ctx context.Context, sessionI
 	// Update session state: reset step count and transition to idle
 	state.StepCount = 0
 	state.CheckpointTranscriptStart = result.TotalTranscriptLines
+	state.CheckpointTranscriptSize = int64(len(result.Transcript))
 	state.Phase = session.PhaseIdle
 	state.LastCheckpointID = checkpointID
 	state.AttributionBaseCommit = state.BaseCommit

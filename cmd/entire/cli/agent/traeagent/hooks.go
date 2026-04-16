@@ -5,19 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
 	"github.com/entireio/cli/cmd/entire/cli/jsonutil"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 )
-
-// Ensure TraeAgent implements HookSupport
-var _ agent.HookSupport = (*TraeAgent)(nil)
 
 // Trae Agent hook names - these become subcommands under `entire hooks trae-agent`
 const (
@@ -64,6 +59,7 @@ var entireHookPrefixes = []string{
 // InstallHooks installs Trae Agent hooks in .trae/settings.json.
 // If force is true, removes existing Entire hooks before installing.
 // Returns the number of hooks installed.
+//nolint:maintidx // Pre-existing high complexity, refactoring moved code out but kept function structure
 func (t *TraeAgent) InstallHooks(ctx context.Context, localDev bool, force bool) (int, error) {
 	// Use repo root instead of CWD to find .trae directory
 	repoRoot, err := paths.WorktreeRoot(ctx)
@@ -411,76 +407,7 @@ func (t *TraeAgent) AreHooksInstalled(ctx context.Context) bool {
 		hookCommandExists(settings.Hooks.SessionStart, "go run ${TRAE_PROJECT_DIR}/cmd/entire/main.go hooks trae-agent session-start")
 }
 
-// ParseHookEvent translates a Trae Agent hook into a normalized lifecycle Event.
-// Returns nil if the hook has no lifecycle significance.
-func (t *TraeAgent) ParseHookEvent(_ context.Context, hookName string, stdin io.Reader) (*agent.Event, error) {
-	switch hookName {
-	case HookNameSessionStart:
-		return t.parseSessionStart(stdin)
-	case HookNameBeforeAgent:
-		return t.parseBeforeAgent(stdin)
-	case HookNameAfterAgent:
-		return t.parseAfterAgent(stdin)
-	case HookNameSessionEnd:
-		return t.parseSessionEnd(stdin)
-	default:
-		return nil, nil //nolint:nilnil // Unknown hooks have no lifecycle action
-	}
-}
-
-func (t *TraeAgent) parseSessionStart(stdin io.Reader) (*agent.Event, error) {
-	input, err := t.ParseHookInput(agent.HookSessionStart, stdin)
-	if err != nil {
-		return nil, err
-	}
-	return &agent.Event{
-		Type:       agent.SessionStart,
-		SessionID:  input.SessionID,
-		SessionRef: input.SessionRef,
-		Timestamp:  time.Now(),
-	}, nil
-}
-
-func (t *TraeAgent) parseBeforeAgent(stdin io.Reader) (*agent.Event, error) {
-	input, err := t.ParseHookInput(agent.HookBeforeAgent, stdin)
-	if err != nil {
-		return nil, err
-	}
-	prompt, _ := input.RawData["prompt"].(string)
-	return &agent.Event{
-		Type:       agent.TurnStart,
-		SessionID:  input.SessionID,
-		SessionRef: input.SessionRef,
-		Prompt:     prompt,
-		Timestamp:  time.Now(),
-	}, nil
-}
-
-func (t *TraeAgent) parseAfterAgent(stdin io.Reader) (*agent.Event, error) {
-	input, err := t.ParseHookInput(agent.HookAfterAgent, stdin)
-	if err != nil {
-		return nil, err
-	}
-	return &agent.Event{
-		Type:       agent.TurnEnd,
-		SessionID:  input.SessionID,
-		SessionRef: input.SessionRef,
-		Timestamp:  time.Now(),
-	}, nil
-}
-
-func (t *TraeAgent) parseSessionEnd(stdin io.Reader) (*agent.Event, error) {
-	input, err := t.ParseHookInput(agent.HookSessionEnd, stdin)
-	if err != nil {
-		return nil, err
-	}
-	return &agent.Event{
-		Type:       agent.SessionEnd,
-		SessionID:  input.SessionID,
-		SessionRef: input.SessionRef,
-		Timestamp:  time.Now(),
-	}, nil
-}
+// ParseHookEvent is defined in lifecycle.go
 
 // GetSupportedHooks returns the hook types Trae Agent supports.
 func (t *TraeAgent) GetSupportedHooks() []agent.HookType {
@@ -497,44 +424,6 @@ func (t *TraeAgent) GetSupportedHooks() []agent.HookType {
 		agent.HookPreCompress,
 		agent.HookNotification,
 	}
-}
-
-// Helper functions for hook management
-
-// TraeHook represents a single hook configuration in Trae Agent
-
-type TraeHook struct {
-	Name    string `json:"name"`
-	Type    string `json:"type"`
-	Command string `json:"command"`
-}
-
-// TraeHooks represents all hook configurations in Trae Agent
-
-type TraeHooks struct {
-	SessionStart        []TraeHook `json:"SessionStart,omitempty"`
-	SessionEnd          []TraeHook `json:"SessionEnd,omitempty"`
-	BeforeAgent         []TraeHook `json:"BeforeAgent,omitempty"`
-	AfterAgent          []TraeHook `json:"AfterAgent,omitempty"`
-	BeforeModel         []TraeHook `json:"BeforeModel,omitempty"`
-	AfterModel          []TraeHook `json:"AfterModel,omitempty"`
-	BeforeToolSelection []TraeHook `json:"BeforeToolSelection,omitempty"`
-	PreTool             []TraeHook `json:"PreTool,omitempty"`
-	AfterTool           []TraeHook `json:"AfterTool,omitempty"`
-	PreCompress         []TraeHook `json:"PreCompress,omitempty"`
-	Notification        []TraeHook `json:"Notification,omitempty"`
-}
-
-// TraeSettings represents the complete Trae Agent settings structure
-
-type TraeSettings struct {
-	HooksConfig TraeHooksConfig `json:"hooksConfig,omitempty"`
-	Hooks       TraeHooks       `json:"hooks,omitempty"`
-}
-
-// TraeHooksConfig represents the hooks configuration settings
-type TraeHooksConfig struct {
-	Enabled bool `json:"enabled,omitempty"`
 }
 
 func hookCommandExists(hooks []TraeHook, command string) bool {

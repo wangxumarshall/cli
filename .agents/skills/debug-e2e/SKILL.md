@@ -39,7 +39,7 @@ When the test run was executed with `E2E_KEEP_REPOS=1`, each test's artifact dir
 The preserved repo contains:
 - Full git history with all branches (main, `entire/checkpoints/v1`)
 - The `.entire/` directory with CLI state, config, and raw logs
-- The `.claude/` directory (if Claude Code was the agent)
+- The `.Codex/` directory (if Codex was the agent)
 - All files the agent created or modified, in their final state
 
 This is the most powerful debugging tool — you can run `git log`, `git diff`, `git show`, inspect `.entire/` internals, and see exactly what the CLI left behind.
@@ -53,7 +53,7 @@ Read `report.nocolor.txt` to identify failures and their error messages. Each en
 ### 2. Read console.log (most important)
 
 Full transcript of every operation:
-- `> claude -p "..." ...` — agent prompts with stdout/stderr
+- `> Codex -p "..." ...` — agent prompts with stdout/stderr
 - `> git add/commit/...` — git commands
 - `> send: ...` — interactive session inputs
 

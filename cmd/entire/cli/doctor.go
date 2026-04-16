@@ -1,10 +1,13 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/huh"
@@ -43,7 +46,11 @@ For each stuck session, you can choose to:
   - Discard: Remove the session state and shadow branch data
   - Skip: Leave the session as-is
 
-Use --force to auto-fix all issues without prompting.`,
+Use --force to condense all fixable sessions without prompting.  Sessions that can't
+be condensed will be discarded.`,
+		PreRun: func(_ *cobra.Command, _ []string) {
+			strategy.EnsureRedactionConfigured()
+		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runSessionsFix(cmd, forceFlag)
 		},
@@ -65,10 +72,23 @@ type stuckSession struct {
 }
 
 func runSessionsFix(cmd *cobra.Command, force bool) error {
+	var finalErr error
+
 	// Check 1: Disconnected metadata branches
 	metadataErr := checkDisconnectedMetadata(cmd, force)
 	if metadataErr != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Error: metadata check failed: %v\n", metadataErr)
+		finalErr = NewSilentError(fmt.Errorf("metadata check failed: %w", metadataErr))
+	}
+	fmt.Fprintln(cmd.OutOrStdout())
+
+	// Check 1b: Git GC index corruption (worktree)
+	gcErr := checkGitGCIndex(cmd, force)
+	if gcErr != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Error: git gc check failed: %v\n", gcErr)
+		if finalErr == nil {
+			finalErr = NewSilentError(fmt.Errorf("git gc check failed: %w", gcErr))
+		}
 	}
 	fmt.Fprintln(cmd.OutOrStdout())
 
@@ -82,8 +102,8 @@ func runSessionsFix(cmd *cobra.Command, force bool) error {
 
 	if len(states) == 0 {
 		fmt.Fprintln(cmd.OutOrStdout(), "No stuck sessions found.")
-		if metadataErr != nil {
-			return fmt.Errorf("metadata check failed: %w", metadataErr)
+		if finalErr != nil {
+			return finalErr
 		}
 		return nil
 	}
@@ -107,8 +127,8 @@ func runSessionsFix(cmd *cobra.Command, force bool) error {
 
 	if len(stuck) == 0 {
 		fmt.Fprintln(cmd.OutOrStdout(), "No stuck sessions found.")
-		if metadataErr != nil {
-			return fmt.Errorf("metadata check failed: %w", metadataErr)
+		if finalErr != nil {
+			return finalErr
 		}
 		return nil
 	}
@@ -126,14 +146,14 @@ func runSessionsFix(cmd *cobra.Command, force bool) error {
 				if err := strat.CondenseSessionByID(ctx, ss.State.SessionID); err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to condense session %s: %v\n", ss.State.SessionID, err)
 				} else {
-					fmt.Fprintf(cmd.OutOrStdout(), "  -> Condensed session %s\n\n", ss.State.SessionID)
+					fmt.Fprintf(cmd.OutOrStdout(), "  ✓ Condensed session %s\n\n", ss.State.SessionID)
 				}
 			} else {
 				// Discard if we can't condense
 				if err := discardSession(ctx, ss, repo, cmd.ErrOrStderr()); err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to discard session %s: %v\n", ss.State.SessionID, err)
 				} else {
-					fmt.Fprintf(cmd.OutOrStdout(), "  -> Discarded session %s\n\n", ss.State.SessionID)
+					fmt.Fprintf(cmd.OutOrStdout(), "  ✓ Discarded session %s\n\n", ss.State.SessionID)
 				}
 			}
 			continue
@@ -153,21 +173,21 @@ func runSessionsFix(cmd *cobra.Command, force bool) error {
 			if err := strat.CondenseSessionByID(ctx, ss.State.SessionID); err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to condense session %s: %v\n", ss.State.SessionID, err)
 			} else {
-				fmt.Fprintf(cmd.OutOrStdout(), "  -> Condensed session %s\n\n", ss.State.SessionID)
+				fmt.Fprintf(cmd.OutOrStdout(), "  ✓ Condensed session %s\n\n", ss.State.SessionID)
 			}
 		case "discard":
 			if err := discardSession(ctx, ss, repo, cmd.ErrOrStderr()); err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to discard session %s: %v\n", ss.State.SessionID, err)
 			} else {
-				fmt.Fprintf(cmd.OutOrStdout(), "  -> Discarded session %s\n\n", ss.State.SessionID)
+				fmt.Fprintf(cmd.OutOrStdout(), "  ✓ Discarded session %s\n\n", ss.State.SessionID)
 			}
 		case "skip":
 			fmt.Fprintf(cmd.OutOrStdout(), "  -> Skipped\n\n")
 		}
 	}
 
-	if metadataErr != nil {
-		return fmt.Errorf("metadata check failed: %w", metadataErr)
+	if finalErr != nil {
+		return finalErr
 	}
 
 	return nil
@@ -320,7 +340,7 @@ func checkDisconnectedMetadata(cmd *cobra.Command, force bool) error {
 	w := cmd.OutOrStdout()
 
 	if !disconnected {
-		fmt.Fprintln(w, "Metadata branches: OK")
+		fmt.Fprintln(w, "✓ Metadata branches: OK")
 		return nil
 	}
 
@@ -354,7 +374,7 @@ func checkDisconnectedMetadata(cmd *cobra.Command, force bool) error {
 		return fmt.Errorf("failed to reconcile metadata branches: %w", fixErr)
 	}
 
-	fmt.Fprintln(w, "  -> Fixed: metadata branches reconciled")
+	fmt.Fprintln(w, "  ✓ Fixed: metadata branches reconciled")
 	return nil
 }
 
@@ -377,4 +397,76 @@ func canDeleteShadowBranch(ctx context.Context, shadowBranch, excludeSessionID s
 	}
 
 	return true, nil
+}
+
+// checkGitGCIndex checks for git index corruption caused by git gc --auto.
+// This is particularly relevant for worktrees where gc can prune objects
+// that the worktree's index cache-tree references.
+func checkGitGCIndex(cmd *cobra.Command, force bool) error {
+	w := cmd.OutOrStdout()
+
+	// Run git status to check for index corruption
+	// If the index is corrupted, git status will fail with errors like:
+	// "fatal: unable to read <hash>" or "error: invalid sha1 pointer in cache-tree"
+	ctx := cmd.Context()
+	var errBuf bytes.Buffer
+	gitCmd := exec.CommandContext(ctx, "git", "status")
+	gitCmd.Stderr = &errBuf
+	statusErr := gitCmd.Run()
+
+	if statusErr == nil {
+		// git status succeeded - index is OK
+		fmt.Fprintln(w, "✓ Git index: OK")
+		return nil
+	}
+
+	// Check if the error is related to index corruption
+	errOutput := errBuf.String()
+	isCorruption := strings.Contains(errOutput, "invalid sha1 pointer") ||
+		strings.Contains(errOutput, "cache-tree") ||
+		strings.Contains(errOutput, "unable to read")
+
+	if !isCorruption {
+		// Some other error - not related to GC corruption
+		fmt.Fprintln(w, "✓ Git index: OK (status error unrelated to GC)")
+		return nil
+	}
+
+	// Index is corrupted
+	fmt.Fprintln(w, "Git index: CORRUPTED")
+	fmt.Fprintln(w, "  Index corruption detected, likely caused by git gc --auto.")
+	fmt.Fprintln(w, "  Fix: running 'git read-tree HEAD' to rebuild the index.")
+	fmt.Fprintln(w, "  Note: Any previously staged changes will need to be re-staged.")
+
+	if !force {
+		var confirmed bool
+		form := NewAccessibleForm(
+			huh.NewGroup(
+				huh.NewConfirm().
+					Title("Fix corrupted git index? Running 'git read-tree HEAD'").
+					Value(&confirmed),
+			),
+		)
+		if formErr := form.Run(); formErr != nil {
+			if errors.Is(formErr, huh.ErrUserAborted) {
+				return nil
+			}
+			return fmt.Errorf("prompt failed: %w", formErr)
+		}
+		if !confirmed {
+			fmt.Fprintln(w, "  -> Skipped")
+			return nil
+		}
+	}
+
+	// Run git read-tree HEAD to rebuild the index
+	var fixErrBuf bytes.Buffer
+	fixCmd := exec.CommandContext(ctx, "git", "read-tree", "HEAD")
+	fixCmd.Stderr = &fixErrBuf
+	if fixRunErr := fixCmd.Run(); fixRunErr != nil {
+		return fmt.Errorf("failed to rebuild index: %w", fixRunErr)
+	}
+
+	fmt.Fprintln(w, "  ✓ Fixed: git index rebuilt")
+	return nil
 }

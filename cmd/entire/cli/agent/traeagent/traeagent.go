@@ -21,6 +21,11 @@ func init() {
 	agent.Register(agent.AgentNameTraeAgent, NewTraeAgent)
 }
 
+// 编译时接口断言
+var _ agent.Agent = (*TraeAgent)(nil)
+var _ agent.HookSupport = (*TraeAgent)(nil)
+var _ agent.TranscriptAnalyzer = (*TraeAgent)(nil)
+
 // TraeAgent implements the Agent interface for Trae Agent.
 type TraeAgent struct{}
 
@@ -164,6 +169,23 @@ func (t *TraeAgent) ParseHookInput(hookType agent.HookType, reader io.Reader) (*
 		input.RawData["response"] = raw.Response
 		input.RawData["token_usage"] = raw.TokenUsage
 
+	case agent.HookBeforeAgent:
+		var raw beforeAgentRaw
+		if err := json.Unmarshal(data, &raw); err != nil {
+			return nil, fmt.Errorf("failed to parse before-agent input: %w", err)
+		}
+		input.SessionID = raw.SessionID
+		input.SessionRef = raw.TrajectoryPath
+		input.RawData["prompt"] = raw.Prompt
+
+	case agent.HookAfterAgent:
+		var raw afterAgentRaw
+		if err := json.Unmarshal(data, &raw); err != nil {
+			return nil, fmt.Errorf("failed to parse after-agent input: %w", err)
+		}
+		input.SessionID = raw.SessionID
+		input.SessionRef = raw.TrajectoryPath
+
 	case agent.HookPreCompress:
 		var raw preCompressRaw
 		if err := json.Unmarshal(data, &raw); err != nil {
@@ -182,6 +204,18 @@ func (t *TraeAgent) ParseHookInput(hookType agent.HookType, reader io.Reader) (*
 		input.SessionRef = raw.TrajectoryPath
 		input.RawData["notification_type"] = raw.NotificationType
 		input.RawData["message"] = raw.Message
+
+	// Supported hooks that don't require special parsing
+	case agent.HookUserPromptSubmit,
+		agent.HookStop,
+		agent.HookBeforeToolSelection,
+		agent.HookPreTool,
+		agent.HookAfterTool:
+		// These hooks are supported but don't need special parsing
+		// The RawData will contain the full input
+
+	default:
+		// Unknown hook type - still store raw data
 	}
 
 	return input, nil
@@ -287,61 +321,4 @@ func (t *TraeAgent) ReadTranscript(sessionRef string) ([]byte, error) {
 // ExtractModifiedFiles extracts modified files from Trae Agent trajectory data.
 func ExtractModifiedFiles(data []byte) ([]string, error) {
 	return extractModifiedFiles(data)
-}
-
-// Raw data structures for parsing hooks
-
-type sessionStartRaw struct {
-	SessionID      string `json:"session_id"`
-	TrajectoryPath string `json:"trajectory_path"`
-}
-
-type sessionEndRaw struct {
-	SessionID      string `json:"session_id"`
-	TrajectoryPath string `json:"trajectory_path"`
-}
-
-type preToolUseRaw struct {
-	SessionID      string          `json:"session_id"`
-	TrajectoryPath string          `json:"trajectory_path"`
-	ToolName       string          `json:"tool_name"`
-	ToolUseID      string          `json:"tool_use_id"`
-	ToolInput      json.RawMessage `json:"tool_input"`
-}
-
-type postToolUseRaw struct {
-	SessionID      string          `json:"session_id"`
-	TrajectoryPath string          `json:"trajectory_path"`
-	ToolName       string          `json:"tool_name"`
-	ToolUseID      string          `json:"tool_use_id"`
-	ToolInput      json.RawMessage `json:"tool_input"`
-	ToolResponse   json.RawMessage `json:"tool_response"`
-}
-
-type preModelRaw struct {
-	SessionID      string `json:"session_id"`
-	TrajectoryPath string `json:"trajectory_path"`
-	ModelName      string `json:"model_name"`
-	Prompt         string `json:"prompt"`
-}
-
-type postModelRaw struct {
-	SessionID      string          `json:"session_id"`
-	TrajectoryPath string          `json:"trajectory_path"`
-	ModelName      string          `json:"model_name"`
-	Response       string          `json:"response"`
-	TokenUsage     json.RawMessage `json:"token_usage"`
-}
-
-type preCompressRaw struct {
-	SessionID      string `json:"session_id"`
-	TrajectoryPath string `json:"trajectory_path"`
-	Context        string `json:"context"`
-}
-
-type notificationRaw struct {
-	SessionID        string `json:"session_id"`
-	TrajectoryPath   string `json:"trajectory_path"`
-	NotificationType string `json:"notification_type"`
-	Message          string `json:"message"`
 }

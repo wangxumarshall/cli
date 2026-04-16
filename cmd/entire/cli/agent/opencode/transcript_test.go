@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
+	"github.com/stretchr/testify/require"
 )
 
 // testExportJSON is an export JSON transcript with 4 messages.
@@ -77,9 +78,7 @@ func TestParseExportSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if session == nil {
-		t.Fatal("expected non-nil session")
-	}
+	require.NotNil(t, session, "expected non-nil session")
 	if len(session.Messages) != 4 {
 		t.Fatalf("expected 4 messages, got %d", len(session.Messages))
 	}
@@ -470,9 +469,7 @@ func TestCalculateTokenUsage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if usage == nil {
-		t.Fatal("expected non-nil usage")
-	}
+	require.NotNil(t, usage, "expected non-nil usage")
 	if usage.InputTokens != 350 {
 		t.Errorf("expected 350 input tokens, got %d", usage.InputTokens)
 	}
@@ -668,6 +665,226 @@ func TestExtractModifiedFiles(t *testing.T) {
 	}
 	if files[1] != "util.go" {
 		t.Errorf("expected second file 'util.go', got %q", files[1])
+	}
+}
+
+func TestExtractAllUserPrompts(t *testing.T) {
+	t.Parallel()
+
+	prompts, err := ExtractAllUserPrompts([]byte(testExportJSON))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(prompts) != 2 {
+		t.Fatalf("expected 2 prompts, got %d: %v", len(prompts), prompts)
+	}
+	if prompts[0] != "Fix the bug in main.go" {
+		t.Errorf("expected first prompt 'Fix the bug in main.go', got %q", prompts[0])
+	}
+	if prompts[1] != "Also fix util.go" {
+		t.Errorf("expected second prompt 'Also fix util.go', got %q", prompts[1])
+	}
+}
+
+func TestExtractAllUserPrompts_SystemReminderOnly(t *testing.T) {
+	t.Parallel()
+
+	session := ExportSession{
+		Info: SessionInfo{ID: "test-sysreminder"},
+		Messages: []ExportMessage{
+			{
+				Info: MessageInfo{ID: "msg-1", Role: "user"},
+				Parts: []Part{
+					{Type: "text", Text: "Fix the bug"},
+				},
+			},
+			{
+				Info: MessageInfo{ID: "msg-2", Role: "user"},
+				Parts: []Part{
+					{Type: "text", Text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\nContents of CLAUDE.md...\n</system-reminder>"},
+				},
+			},
+			{
+				Info: MessageInfo{ID: "msg-3", Role: "user"},
+				Parts: []Part{
+					{Type: "text", Text: "Now fix util.go"},
+				},
+			},
+		},
+	}
+	data, err := json.Marshal(session)
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+
+	prompts, err := ExtractAllUserPrompts(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(prompts) != 2 {
+		t.Fatalf("expected 2 prompts (system-reminder excluded), got %d: %v", len(prompts), prompts)
+	}
+	if prompts[0] != "Fix the bug" {
+		t.Errorf("expected 'Fix the bug', got %q", prompts[0])
+	}
+	if prompts[1] != "Now fix util.go" {
+		t.Errorf("expected 'Now fix util.go', got %q", prompts[1])
+	}
+}
+
+func TestExtractAllUserPrompts_SystemReminderMixed(t *testing.T) {
+	t.Parallel()
+
+	session := ExportSession{
+		Info: SessionInfo{ID: "test-mixed"},
+		Messages: []ExportMessage{
+			{
+				Info: MessageInfo{ID: "msg-1", Role: "user"},
+				Parts: []Part{
+					{Type: "text", Text: "Fix the bug\n<system-reminder>\nCLAUDE.md contents here\n</system-reminder>"},
+				},
+			},
+		},
+	}
+	data, err := json.Marshal(session)
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+
+	prompts, err := ExtractAllUserPrompts(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(prompts) != 1 {
+		t.Fatalf("expected 1 prompt, got %d: %v", len(prompts), prompts)
+	}
+	if prompts[0] != "Fix the bug" {
+		t.Errorf("expected 'Fix the bug', got %q", prompts[0])
+	}
+}
+
+func TestExtractAllUserPrompts_SystemReminderWithWhitespace(t *testing.T) {
+	t.Parallel()
+
+	session := ExportSession{
+		Info: SessionInfo{ID: "test-whitespace"},
+		Messages: []ExportMessage{
+			{
+				Info: MessageInfo{ID: "msg-1", Role: "user"},
+				Parts: []Part{
+					{Type: "text", Text: "  \n<system-reminder>\nsome context\n</system-reminder>\n  "},
+				},
+			},
+		},
+	}
+	data, err := json.Marshal(session)
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+
+	prompts, err := ExtractAllUserPrompts(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(prompts) != 0 {
+		t.Fatalf("expected 0 prompts (whitespace + system-reminder), got %d: %v", len(prompts), prompts)
+	}
+}
+
+func TestIsSystemReminderOnly(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{
+			name:    "exact system-reminder",
+			content: "<system-reminder>context here</system-reminder>",
+			want:    true,
+		},
+		{
+			name:    "with surrounding whitespace",
+			content: "  \n<system-reminder>context</system-reminder>\n  ",
+			want:    true,
+		},
+		{
+			name:    "not system-reminder",
+			content: "Fix the bug",
+			want:    false,
+		},
+		{
+			name:    "mixed content",
+			content: "Fix the bug\n<system-reminder>context</system-reminder>",
+			want:    false,
+		},
+		{
+			name:    "empty",
+			content: "",
+			want:    false,
+		},
+		{
+			// Multiple blocks with real content between them — starts with open tag
+			// and ends with close tag, but is NOT system-reminder-only.
+			name:    "real content between multiple blocks",
+			content: "<system-reminder>a</system-reminder>Fix this<system-reminder>b</system-reminder>",
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := isSystemReminderOnly(tt.content); got != tt.want {
+				t.Errorf("isSystemReminderOnly(%q) = %v, want %v", tt.content, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStripSystemReminders(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "no system-reminder",
+			content: "Fix the bug",
+			want:    "Fix the bug",
+		},
+		{
+			name:    "only system-reminder",
+			content: "<system-reminder>context</system-reminder>",
+			want:    "",
+		},
+		{
+			name:    "mixed content",
+			content: "Fix the bug\n<system-reminder>context</system-reminder>",
+			want:    "Fix the bug",
+		},
+		{
+			name:    "system-reminder in middle",
+			content: "First part\n<system-reminder>context</system-reminder>\nSecond part",
+			want:    "First part\n\nSecond part",
+		},
+		{
+			name:    "multiple system-reminders",
+			content: "<system-reminder>a</system-reminder>Fix this<system-reminder>b</system-reminder>",
+			want:    "Fix this",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := stripSystemReminders(tt.content); got != tt.want {
+				t.Errorf("stripSystemReminders(%q) = %q, want %q", tt.content, got, tt.want)
+			}
+		})
 	}
 }
 
