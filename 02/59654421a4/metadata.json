@@ -214,6 +214,12 @@
       "transcript": "/02/59654421a4/0/full.jsonl",
       "content_hash": "/02/59654421a4/0/content_hash.txt",
       "prompt": "/02/59654421a4/0/prompt.txt"
+    },
+    {
+      "metadata": "/02/59654421a4/1/metadata.json",
+      "transcript": "/02/59654421a4/1/full.jsonl",
+      "content_hash": "/02/59654421a4/1/content_hash.txt",
+      "prompt": ""
     }
   ],
   "token_usage": {
